@@ -1,0 +1,25 @@
+diff --git a/src/NDSCart.cpp b/src/NDSCart.cpp
+index bfc07f9..f8eed8a 100644
+--- a/src/NDSCart.cpp
++++ b/src/NDSCart.cpp
+@@ -20,6 +20,7 @@
+ #include "NDS.h"
+ #include "DSi.h"
+ #include "NDSCart.h"
++#include "PSZPlugin.h"
+ #include "CRC32.h"
+ #include "Platform.h"
+ #include "ROMList.h"
+@@ -1597,6 +1598,12 @@ std::unique_ptr<CartCommon> ParseROM(const u8* romdata, u32 romlen, void* userda
+ 
+ std::unique_ptr<CartCommon> ParseROM(std::unique_ptr<u8[]>&& romdata, u32 romlen, void* userdata, std::optional<NDSCartArgs>&& args)
+ {
++    // psz-melonmix: ROM-image patches, applied to the in-memory copy only, so
++    // the file on disk is never written. Same hook as the desktop core; this is
++    // a separate fork with its own copy of this file.
++    if (romdata != nullptr)
++        PSZMix::PatchEternalMultiplayer(romdata.get(), romlen);
++
+     if (romdata == nullptr)
+     {
+         Log(LogLevel::Error, "NDSCart: romdata is null\n");
