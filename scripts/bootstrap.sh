@@ -31,8 +31,15 @@ fetch() {
 
     if [ ! -d "$dir/.git" ]; then
         echo ">> cloning $name"
-        git clone -q "$url" "$dir"
+        # Keep LF in the working tree. Git for Windows defaults autocrlf on, so
+        # upstream lands as CRLF there and every patch fails with "does not
+        # apply" -- the context lines simply do not match byte for byte. The
+        # upstream tree must be identical on every platform for the patches to
+        # be meaningful at all.
+        git clone -q -c core.autocrlf=false -c core.eol=lf "$url" "$dir"
     fi
+    git -C "$dir" config core.autocrlf false
+    git -C "$dir" config core.eol lf
     echo ">> $name -> $rev"
     git -C "$dir" fetch -q origin "$rev" 2>/dev/null || git -C "$dir" fetch -q origin
     git -C "$dir" checkout -q "$rev"
