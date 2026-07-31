@@ -80,13 +80,30 @@ android() {
     git -C "$dir" submodule update --init --depth 1 \
         melonDS-android-lib app/src/main/cpp/oboe app/src/main/cpp/faad2 app/src/main/cpp/enet
 
+    # Reset the core submodule too. Without this a previous run's patches are
+    # still applied and re-applying fails, so bootstrap was not idempotent on the
+    # Android side even though it was on the desktop one.
     local lib="$dir/melonDS-android-lib"
-    git -C "$lib" checkout -q "$(pin melonds-android-lib rev)"
-    cp "$ROOT/psz/PSZPlugin.h" "$ROOT/psz/PSZPlugin.cpp" "$lib/src/"
+    local librev; librev="$(pin melonds-android-lib rev)"
+    git -C "$lib" checkout -q "$librev"
+    git -C "$lib" reset -q --hard "$librev"
+    git -C "$lib" clean -qfd
+    # Glob, for the same reason the desktop path does: naming the files meant a
+    # newly added header (PSZOverlayIDs.h) was copied nowhere and the Android
+    # build failed on a missing include while the desktop one was fine.
+    cp "$ROOT"/psz/*.h "$ROOT"/psz/*.cpp "$lib/src/"
 
-    # The app and its core are separate repos, so the patches land in each.
-    git -C "$dir" apply --whitespace=nowarn "$ROOT/integration/melonds-android/0001-hook-psz-composite.patch"
-    git -C "$lib" apply --whitespace=nowarn "$ROOT/integration/melonds-android/0002-lib-build-pszplugin.patch"
+    # Our launcher icon and adaptive-icon config, overwriting upstream's melon.
+    # Copied rather than patched because they are binaries; a binary hunk in a
+    # patch file is unreadable and merges badly.
+    cp -r "$ROOT"/psz/android/res/. "$dir/app/src/main/res/"
+
+    # The app and its core are separate repos, so patches are split by target
+    # directory and applied wholesale. Naming them individually is what let the
+    # app-identity patch sit unapplied for a whole build -- the APK came out as
+    # me.magnum.melonds.dev, labelled "melonDS Dev", with only the icons changed.
+    apply_patches "$dir" "$ROOT/integration/melonds-android/app"
+    apply_patches "$lib" "$ROOT/integration/melonds-android/lib"
     echo ">> android tree ready: $dir"
 }
 

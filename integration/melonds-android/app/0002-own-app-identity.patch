@@ -1,5 +1,5 @@
 diff --git a/app/build.gradle.kts b/app/build.gradle.kts
-index 70a4d52..07df9a5 100644
+index 70a4d52e..07df9a52 100644
 --- a/app/build.gradle.kts
 +++ b/app/build.gradle.kts
 @@ -25,7 +25,14 @@ android {
@@ -18,8 +18,19 @@ index 70a4d52..07df9a5 100644
          minSdk = AppConfig.minSdkVersion
          targetSdk = AppConfig.targetSdkVersion
          versionCode = AppConfig.versionCode
+diff --git a/app/src/debug/res/values/strings.xml b/app/src/debug/res/values/strings.xml
+index ea6e9a01..6062572d 100644
+--- a/app/src/debug/res/values/strings.xml
++++ b/app/src/debug/res/values/strings.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">melonDS Dev</string>
++    <string name="app_name">PSZ MelonMix Dev</string>
+ </resources>
+\ No newline at end of file
 diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
-index a41eecb..464343e 100644
+index a41eecbe..464343eb 100644
 --- a/app/src/main/res/values/strings.xml
 +++ b/app/src/main/res/values/strings.xml
 @@ -1,5 +1,5 @@
@@ -29,3 +40,14 @@ index a41eecb..464343e 100644
  
      <string name="ok">OK</string>
      <string name="yes">Yes</string>
+diff --git a/app/src/nightly/res/values/strings.xml b/app/src/nightly/res/values/strings.xml
+index 871b5a67..92a3e9e6 100644
+--- a/app/src/nightly/res/values/strings.xml
++++ b/app/src/nightly/res/values/strings.xml
+@@ -1,4 +1,4 @@
+ <?xml version="1.0" encoding="utf-8"?>
+ <resources>
+-    <string name="app_name">melonDS Nightly</string>
++    <string name="app_name">PSZ MelonMix Nightly</string>
+ </resources>
+\ No newline at end of file
