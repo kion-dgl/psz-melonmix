@@ -77,6 +77,22 @@ struct Frame
 // SELECT toggle, then returns what the frontend should draw.
 Frame Update(NDS* nds);
 
+// Redirect the first multiplayer quest to "The Eternal".
+//
+// PSZ ships The Eternal as a SINGLE-player quest, so making it playable in
+// multiplayer needs no new content -- only for the multiplayer slot to read the
+// single-player file. The community patcher does this by rewriting the ROM on
+// disk; this does the same thing to the in-memory image at load, so the file on
+// disk is never touched and it can be a toggle.
+//
+// It rewrites one 8-byte FAT entry, not the data: the multiplayer quest's entry
+// is pointed at the single-player quest's offset and length, so the game reads
+// the whole of the right file rather than a truncated or padded copy.
+//
+// Returns true if it patched. Verifies the gamecode and both file sizes first
+// and does nothing on a mismatch -- a wrong offset here corrupts a quest.
+bool PatchEternalMultiplayer(u8* rom, u32 romlen);
+
 // Reference compositor at DS resolution: writes the overlay straight into the
 // TOP framebuffer, reading from the bottom one. Both are 256x192 BGRA.
 //

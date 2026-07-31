@@ -22,6 +22,7 @@
 
 #include <cstdlib>
 #include <cstdio>
+#include <cstring>
 
 namespace PSZMix
 {
@@ -359,6 +360,53 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
                  ? m : 192 - m - e.sh;
         Blit(topFB, bottomFB, e.sx, e.sy, e.sw, e.sh, dx, dy);
     }
+}
+
+}
+
+namespace PSZMix
+{
+
+// From psz-re's ROM metadata for C24E. IDs and sizes, not content.
+static constexpr u32 EternalSingleFileId = 3101;   // quest/single/free/quest_0021100.rel
+static constexpr u32 WildValleyMultiId   = 3067;   // quest/multi/free/quest_0121100.rel
+static constexpr u32 EternalSingleSize   = 137;
+static constexpr u32 WildValleyMultiSize = 150;
+
+static u32 Rd32(const u8* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
+static void Wr32(u8* p, u32 v)
+{
+    p[0] = (u8)v; p[1] = (u8)(v >> 8); p[2] = (u8)(v >> 16); p[3] = (u8)(v >> 24);
+}
+
+bool PatchEternalMultiplayer(u8* rom, u32 romlen)
+{
+    static const bool on = EnvSet("PSZ_ETERNAL_MULTIPLAYER");
+    if (!on || !rom || romlen < 0x200) return false;
+
+    // Gamecode at 0x0C. Only ever touch the ROM this was measured against.
+    if (memcmp(rom + 0x0C, "C24E", 4) != 0) return false;
+
+    const u32 fatOff = Rd32(rom + 0x48), fatLen = Rd32(rom + 0x4C);
+    const u32 need = (WildValleyMultiId > EternalSingleFileId
+                      ? WildValleyMultiId : EternalSingleFileId) * 8 + 8;
+    if (fatOff == 0 || fatLen < need || fatOff + fatLen > romlen) return false;
+
+    u8* single = rom + fatOff + EternalSingleFileId * 8;
+    u8* multi  = rom + fatOff + WildValleyMultiId  * 8;
+
+    const u32 sStart = Rd32(single), sEnd = Rd32(single + 4);
+    const u32 mStart = Rd32(multi),  mEnd = Rd32(multi + 4);
+    if (sEnd < sStart || mEnd < mStart) return false;
+
+    // Refuse unless both files are the size the metadata says. A FAT index that
+    // has shifted would otherwise silently repoint some unrelated file.
+    if (sEnd - sStart != EternalSingleSize) return false;
+    if (mEnd - mStart != WildValleyMultiSize) return false;
+
+    Wr32(multi, sStart);
+    Wr32(multi + 4, sEnd);
+    return true;
 }
 
 }
