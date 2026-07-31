@@ -83,6 +83,13 @@ jobs:
         run: sdkmanager --install "ndk;29.0.14206865" "cmake;3.22.1"
       - run: ./scripts/bootstrap.sh android
       - run: ./scripts/build-android.sh
+        env:
+          # Absent on forks and on pull requests from them, in which case the
+          # script falls back to an unsigned debug APK rather than failing.
+          PSZ_KEYSTORE_B64: ${{ secrets.PSZ_KEYSTORE_B64 }}
+          PSZ_KEYSTORE_PASSWORD: ${{ secrets.PSZ_KEYSTORE_PASSWORD }}
+          PSZ_KEY_ALIAS: ${{ secrets.PSZ_KEY_ALIAS }}
+          PSZ_KEY_PASSWORD: ${{ secrets.PSZ_KEY_PASSWORD }}
       - uses: actions/upload-artifact@v4
         with:
           name: android

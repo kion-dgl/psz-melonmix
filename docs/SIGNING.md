@@ -1,0 +1,54 @@
+# Signing the Android build
+
+The APK is signed with a keystore dedicated to this project. **It is deliberately
+not the psz-godot key.**
+
+Reusing that one would buy nothing — the value of a stable key is in-place
+updates, and that is per *package name*, so a different app gets no continuity
+from sharing it. And it would cost something real: signing in CI means putting
+the keystore into a **public** repository's secrets, where a leak would let
+someone sign an APK that installs in place over the actual PSZ Godot game. A
+separate key keeps that blast radius to an emulator build nobody depends on.
+
+## The keystore
+
+Generated locally and kept out of the repo, mirroring the psz-godot bundle:
+
+```
+~/projects/psz-melonmix-keystore-bundle/
+  psz-melonmix-release.keystore      alias: psz-melonmix, RSA 4096, 10000 days
+  psz-melonmix-release.keystore.b64  what goes into the CI secret
+  passphrase.txt
+```
+
+Back this up somewhere durable. Losing it means the package can never be updated
+in place again — every future release would need an uninstall first, which on
+Android also drops app data.
+
+## Repository secrets
+
+```sh
+B=~/projects/psz-melonmix-keystore-bundle
+gh secret set PSZ_KEYSTORE_B64      --repo kion-dgl/psz-melonmix < "$B/psz-melonmix-release.keystore.b64"
+gh secret set PSZ_KEYSTORE_PASSWORD --repo kion-dgl/psz-melonmix < "$B/passphrase.txt"
+gh secret set PSZ_KEY_PASSWORD      --repo kion-dgl/psz-melonmix < "$B/passphrase.txt"
+gh secret set PSZ_KEY_ALIAS         --repo kion-dgl/psz-melonmix --body psz-melonmix
+```
+
+With those present CI builds a signed release; without them it falls back to an
+unsigned debug APK, so forks and pull requests still build.
+
+## Package identity
+
+`applicationId` is **`com.dashgl.pszmelonmix`**, not upstream's
+`me.magnum.melonds`.
+
+That matters more than it looks. A release build under the upstream id would
+collide with a stock melonDS install — same package, different signature, which
+Android refuses outright with `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Only the
+debug build's `.dev` suffix was keeping the two apart, and that suffix does not
+apply to releases.
+
+Hyphens are not legal in an `applicationId` (each segment must be a valid Java
+identifier), so it is `pszmelonmix`. The display name is "PSZ MelonMix", which
+has no such restriction.

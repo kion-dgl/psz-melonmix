@@ -1,0 +1,31 @@
+diff --git a/app/build.gradle.kts b/app/build.gradle.kts
+index 70a4d52..07df9a5 100644
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -25,7 +25,14 @@ android {
+     compileSdk = AppConfig.compileSdkVersion
+     ndkVersion = AppConfig.ndkVersion
+     defaultConfig {
+-        applicationId = "me.magnum.melonds"
++        // Our own identity. Upstream melonDS is me.magnum.melonds, and a
++        // release build of this fork would otherwise collide with a stock
++        // melonDS install: same package, different signature, so Android
++        // refuses the install outright. Only the debug suffix (.dev) was
++        // keeping the two apart.
++        // Hyphens are not legal in an applicationId -- each segment must be a
++        // valid Java identifier -- so this is pszmelonmix, not psz-melonmix.
++        applicationId = "com.dashgl.pszmelonmix"
+         minSdk = AppConfig.minSdkVersion
+         targetSdk = AppConfig.targetSdkVersion
+         versionCode = AppConfig.versionCode
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index a41eecb..464343e 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -1,5 +1,5 @@
+ <resources xmlns:tools="http://schemas.android.com/tools">
+-    <string name="app_name">melonDS</string>
++    <string name="app_name">PSZ MelonMix</string>
+ 
+     <string name="ok">OK</string>
+     <string name="yes">Yes</string>
