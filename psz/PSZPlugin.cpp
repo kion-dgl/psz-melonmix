@@ -18,6 +18,7 @@
 #include "NDS.h"
 #include "GPU.h"
 #include "PSZOverlayIDs.h"
+#include "PSZCheats.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -92,6 +93,15 @@ static const u32 kWidescreen[] = {
     0xD2000000, 0x00000000,
 };
 
+// TWO CLASSES, and the split is deliberate.
+//
+// QUALITY OF LIFE is on by default: it is what makes this build pleasant rather
+// than what makes the game easier. Widescreen belongs here.
+//
+// OPT-IN is off by default and lives in PSZCheats.h, generated from the cheat
+// database. These skip grind and change the game, so nobody gets them without
+// asking. A player who wants to pick PSZ up again and just have fun can turn
+// them on; a player who wants PSZ gets PSZ.
 static const Cheat kCheats[] = {
     { "16:9 widescreen", "PSZ_CHEAT_WIDESCREEN", true, kWidescreen, 6 },
 };
@@ -201,6 +211,14 @@ static void ApplyCheats(NDS* nds)
 {
     for (int i = 0; i < NumCheats; i++)
         ApplyCheat(nds, kCheats[i]);
+
+    // Opt-in, all default false.
+    for (int i = 0; i < kNumGeneratedCheats; i++)
+    {
+        const GeneratedCheat& g = kGeneratedCheats[i];
+        Cheat c { g.name, g.env, g.defaultOn, g.codes, g.words };
+        ApplyCheat(nds, c);
+    }
 }
 
 // SELECT toggles the area map. Chosen by measurement: idle, SELECT moved 78
