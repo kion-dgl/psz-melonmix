@@ -16,6 +16,7 @@
 
 #include "PSZPlugin.h"
 #include "NDS.h"
+#include "GPU.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -132,6 +133,58 @@ static void ApplyCheat(NDS* nds, const Cheat& c)
     }
 }
 
+// Is the bottom screen worth presenting?
+//
+// The modal rule -- null player object, or control mode 5 -- says "the bottom
+// screen is the interaction". It is right for menus, shops and the counter, and
+// WRONG for cutscenes and dialogue, where the top screen carries the content and
+// the bottom holds only a skip prompt. Presenting it there hides exactly what the
+// player is looking at.
+//
+// Rather than trying to identify those states by mode, ask the question the
+// decision actually rests on: does the bottom screen have anything on it? A menu
+// is dense. A cutscene's bottom screen is close to a flat fill.
+//
+// Note this deliberately does NOT test for the field HUD. Opening the Start menu
+// removes that HUD, so a HUD test would misread a menu as "not a UI" -- kion
+// caught that. Emptiness is the property that separates the cases; HUD presence
+// is not.
+static bool BottomScreenHasContent(NDS* nds)
+{
+    // GetFramebuffers returns false when the 3D renderer is accelerated, in
+    // which case the frame lives in a GL texture and there is nothing to sample
+    // on the CPU. Assume there is content rather than guessing -- that keeps the
+    // previous behaviour instead of blanking a screen we cannot inspect.
+    void* topbuf = nullptr; void* bottombuf = nullptr;
+    if (!nds->GPU.GetFramebuffers(&topbuf, &bottombuf) || !bottombuf) return true;
+    const u32* bottom = (const u32*)bottombuf;
+
+    // Quantise to RGB444 and find the commonest colour; whatever is not that is
+    // content. A flat fill plus a small prompt lands near zero.
+    static u16 hist[4096];
+    for (int i = 0; i < 4096; i++) hist[i] = 0;
+
+    int total = 0;
+    for (int y = 0; y < 192; y += 3)
+        for (int x = 0; x < 256; x += 3)
+        {
+            const u32 c = bottom[y * 256 + x];
+            const int q = (((c >> 20) & 0xF) << 8) | (((c >> 12) & 0xF) << 4) | ((c >> 4) & 0xF);
+            hist[q]++; total++;
+        }
+    int top = 0;
+    for (int i = 0; i < 4096; i++) if (hist[i] > top) top = hist[i];
+
+    const float content = 1.0f - (float)top / (float)total;
+    float threshold = 0.12f;
+    if (const char* v = std::getenv("PSZ_MODAL_MIN_CONTENT"))
+    {
+        const float f = (float)atof(v);
+        if (f > 0.f && f < 1.f) threshold = f;
+    }
+    return content >= threshold;
+}
+
 static void ApplyCheats(NDS* nds)
 {
     for (int i = 0; i < NumCheats; i++)
@@ -196,6 +249,11 @@ Frame Update(NDS* nds)
 
     if (!inGame || Read(nds, base + 0x280, 4) == 5)
     {
+        // Cutscene or dialogue: the bottom screen is nearly empty, so presenting
+        // it would replace the content with a skip prompt. Draw nothing at all
+        // and let the top screen through untouched.
+        if (!BottomScreenHasContent(nds)) return f;   // active stays false
+
         f.active = true;
         f.modal = true;
         return f;

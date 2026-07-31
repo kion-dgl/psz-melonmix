@@ -102,6 +102,14 @@ decided by two reads. No overlay images, no heuristics.</p>
     <td><strong>Field or town.</strong> Composite the four corner elements over
         the top screen.</td>
   </tr>
+  <tr>
+    <td>either of the above, but the bottom screen is <strong>nearly empty</strong></td>
+    <td><strong>Cutscene or dialogue.</strong> Draw nothing — let the top screen
+        through untouched. Emptiness is measured, not inferred: quantise the
+        bottom screen to RGB444, and if all but under 12%
+        (<code>PSZ_MODAL_MIN_CONTENT</code>) of sampled pixels are the single
+        commonest colour, there is nothing there worth showing.</td>
+  </tr>
 </table>
 </div>
 
@@ -226,18 +234,29 @@ The rule cannot tell them apart, so it gets the second class wrong every time.
     <td>2</td><td>Cutscenes — the opening one before the title, and the one after
         character creation</td>
     <td>show the top screen, where the cutscene plays</td>
-    <td>shows the bottom screen, which holds only a small skip prompt in the
-        corner</td>
+    <td><strong>FIXED.</strong> Verified on the SEGA splash: the top screen now
+        shows plain where the near-blank bottom screen used to cover it.</td>
   </tr>
   <tr>
     <td>3</td><td>Dialogue</td>
     <td>show the top screen, where the dialogue is drawn</td>
-    <td>shows the bottom screen, which holds only the skip option</td>
+    <td><strong>Fix applied, not yet verified</strong> — it takes the same path as
+        the cutscenes, but no savestate mid-dialogue exists to confirm it on.</td>
   </tr>
 </table>
 </div>
 
-<h3>Why this needs two signals, not one</h3>
+<h3>Why the check is emptiness, not "is the HUD drawn"</h3>
+<p>The obvious test is whether the field HUD is present in the rects we are about
+to copy. It is the wrong test: <strong>opening the Start menu removes that
+HUD</strong>, so a menu would read as "not a UI" and be passed through — trading
+three bugs for a worse one.</p>
+<p>Emptiness is the property the decision actually rests on. A menu is dense
+whether or not it contains the field HUD; a cutscene's bottom screen is close to
+a flat fill. That also leaves the check indifferent to <em>which</em> UI is on the
+bottom screen, so a menu nobody has catalogued still behaves correctly.</p>
+
+<h3>Why the title still needs a second signal</h3>
 <p>Neither available test separates the cases on its own:</p>
 <ul>
   <li><strong>Content density will not fix the title.</strong> Its bottom screen
