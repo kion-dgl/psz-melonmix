@@ -20,7 +20,7 @@
 #include <cstdlib>
 #include <cstdio>
 
-namespace PSZ
+namespace PSZMix
 {
 
 static constexpr u32 PlayerPtr = 0x02108D04;
@@ -157,7 +157,7 @@ Frame Update(NDS* nds)
 
 }
 
-namespace PSZ
+namespace PSZMix
 {
 
 static void Blit(u32* dst, const u32* src, int sx, int sy, int sw, int sh,

@@ -7,7 +7,7 @@
 
 #include <cstdlib>
 
-namespace PSZ
+namespace PSZMix
 {
 
 namespace

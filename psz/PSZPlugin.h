@@ -23,7 +23,11 @@
 
 namespace melonDS { class NDS; }
 
-namespace PSZ
+// PSZMix, not PSZ. The Windows SDK's minwindef.h has `typedef char *PSZ;` --
+// a legacy "pointer to zero-terminated string" alias -- so a namespace called
+// PSZ redeclares it as a different kind of entity and every Windows build dies
+// in the system headers. Found by CI on the first green Windows bootstrap.
+namespace PSZMix
 {
 using namespace melonDS;
 

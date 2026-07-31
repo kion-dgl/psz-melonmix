@@ -17,8 +17,8 @@ index 8fdc5c4..6913477 100644
 +            // psz-melonmix: single-screen overlay. The plugin decides what to
 +            // show; Composite writes it into the TOP framebuffer before upload,
 +            // so no GL work is needed on this side.
-+            PSZ::Frame pszFrame = PSZ::Update(nds);
-+            PSZ::Composite((u32*) nds->GPU.Framebuffer[frontbuf][0].get(),
++            PSZMix::Frame pszFrame = PSZMix::Update(nds);
++            PSZMix::Composite((u32*) nds->GPU.Framebuffer[frontbuf][0].get(),
 +                           (const u32*) nds->GPU.Framebuffer[frontbuf][1].get(),
 +                           pszFrame);
 +

@@ -5,7 +5,7 @@
     show; this decides how big and where, using the window's own geometry.
 
     Drawing is kept out of the core on purpose. Compositing into the 256x192
-    framebuffer -- which is what PSZ::Composite does for frontends that have no
+    framebuffer -- which is what PSZMix::Composite does for frontends that have no
     other option -- locks every element to DS pixel scale, where a 70px panel is
     27% of the screen at any output resolution. A frontend that knows its window
     size can do better, and this is that.
@@ -20,7 +20,7 @@
 
 #include "PSZPlugin.h"
 
-namespace PSZ
+namespace PSZMix
 {
 
 // Draw the overlay for `f` onto the top screen, whose on-window rect is `top`.

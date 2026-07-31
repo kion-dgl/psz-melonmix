@@ -42,13 +42,13 @@ index 3413496f..eac1953d 100755
 +        // psz-melonmix: the core plugin decides what to show, this frontend
 +        // draws it in window pixels anchored to the top screen's on-window rect.
 +        {
-+            PSZ::Frame psz = PSZ::Update(emuInstance->getNDS());
++            PSZMix::Frame psz = PSZMix::Update(emuInstance->getNDS());
 +            for (int i = 0; psz.active && i < numScreens; i++)
 +            {
 +                if (screenKind[i] != 0) continue;   // top screen only
 +                QRectF top = screenTrans[i].mapRect(QRectF(0, 0, 256, 192));
 +                painter.resetTransform();
-+                PSZ::DrawOverlayQt(painter, screen[1], top, psz);
++                PSZMix::DrawOverlayQt(painter, screen[1], top, psz);
 +                break;
 +            }
 +        }
