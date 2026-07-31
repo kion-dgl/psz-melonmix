@@ -41,5 +41,12 @@ jobs:
             **You supply your own ROM.** Nothing here contains game data, and the
             ROM is never modified — this is a custom melonDS that loads it as normal.
 
-            Contains Linux and Windows desktop builds, an Android APK, and the
-            assembled source tarball (GPLv3 corresponding source).
+            | Download | For |
+            |---|---|
+            | `psz-melonmix-android.apk` | Android handhelds — Retroid, Odin, phones |
+            | `psz-melonmix-windows-x86_64.zip` | Windows — unzip and run `melonDS.exe` |
+            | `psz-melonmix-linux-x86_64.tar.gz` | Linux |
+            | `psz-melonmix-source.tar.gz` | the assembled source (GPLv3 corresponding source) |
+
+            Starts in the single-screen 16:9 view with the HUD composited onto
+            the top screen. SELECT toggles the area map.

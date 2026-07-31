@@ -56,6 +56,7 @@ jobs:
             mingw-w64-x86_64-zstd mingw-w64-x86_64-enet
             mingw-w64-x86_64-libslirp mingw-w64-x86_64-faad2
             mingw-w64-x86_64-extra-cmake-modules
+            zip
       - run: ./scripts/bootstrap.sh desktop
       - run: ./scripts/build-desktop.sh
       - name: Package
@@ -65,10 +66,13 @@ jobs:
           # Bundle the runtime DLLs, or it will not start off this machine.
           ldd dist/melonDS.exe | grep -i mingw64 | awk '{print $3}' | xargs -I{} cp {} dist/ || true
           /mingw64/share/qt6/bin/windeployqt.exe dist/melonDS.exe || true
+          # ONE archive. Uploading dist/ directly put 35 loose DLLs on the
+          # releases page next to the things people actually want.
+          cd dist && zip -qr ../psz-melonmix-windows-x86_64.zip . && cd ..
       - uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: dist/
+          path: psz-melonmix-windows-x86_64.zip
 
   android:
     runs-on: ubuntu-24.04
@@ -90,10 +94,18 @@ jobs:
           PSZ_KEYSTORE_PASSWORD: ${{ secrets.PSZ_KEYSTORE_PASSWORD }}
           PSZ_KEY_ALIAS: ${{ secrets.PSZ_KEY_ALIAS }}
           PSZ_KEY_PASSWORD: ${{ secrets.PSZ_KEY_PASSWORD }}
+      - name: Name the APK for humans
+        run: |
+          mkdir -p dist
+          # Prefer the signed release APK; fall back to debug on forks, which
+          # have no keystore secret.
+          APK=$(find build/melonDS-android/app/build/outputs/apk -name "*release*.apk" | head -1)
+          [ -n "$APK" ] || APK=$(find build/melonDS-android/app/build/outputs/apk -name "*.apk" | head -1)
+          cp "$APK" "dist/psz-melonmix-android.apk"
       - uses: actions/upload-artifact@v4
         with:
           name: android
-          path: build/melonDS-android/app/build/outputs/apk/**/*.apk
+          path: dist/psz-melonmix-android.apk
 
   # GPLv3: shipping binaries obliges us to ship the corresponding source. The
   # patches alone are thin cover — if an upstream rev ever disappears, a release
