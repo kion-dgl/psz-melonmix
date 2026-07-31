@@ -1,0 +1,24 @@
+# Pinned upstreams. Bump a rev here, run scripts/bootstrap.sh, and CI will tell
+# you whether the integration patches still apply.
+#
+# Why injection rather than a fork: the desktop and Android builds use DIFFERENT
+# melonDS cores with independent histories (melonDS proper, and the Android
+# project's own fork). One fork cannot serve both. But psz/PSZPlugin.{h,cpp}
+# compiled unmodified in both, so a portable plugin plus a thin per-frontend hook
+# does — and the hooks are 32 and 39 patch lines respectively.
+
+[melonds]
+url = "https://github.com/melonDS-emu/melonDS.git"
+rev = "82fdbc78483f43b310e920e21acc47787cb43564"   # 1.1-era, tested
+# psz/PSZPlugin.*      -> src/
+# psz/qt/PSZOverlayQt.* -> src/frontend/qt_sdl/
+
+[melonds-android]
+url = "https://github.com/rafaelvcaetano/melonDS-android.git"
+rev = "ae8790bdb4bf01555c2f168ab9bc77fbeb5dceb6"
+
+[melonds-android-lib]
+# A submodule of melonds-android, and a separate fork of the core.
+url = "https://github.com/rafaelvcaetano/melonDS-android-lib.git"
+rev = "431ab4bd0003c4356e25fce89640ae1004579b9b"
+# psz/PSZPlugin.* -> src/

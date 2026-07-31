@@ -1,0 +1,106 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# The point of CI here is not only "does it compile". bootstrap.sh applies the
+# integration patches with NO fuzz, so a red build after an upstream bump means
+# a hook moved — which is exactly the signal we want, and the thing that used to
+# be discovered by hand days later.
+
+jobs:
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake extra-cmake-modules ninja-build \
+            libsdl2-dev libpcap-dev libarchive-dev libzstd-dev libenet-dev \
+            libslirp-dev libfaad-dev qt6-base-dev qt6-base-private-dev \
+            qt6-multimedia-dev libqt6svg6-dev
+      - run: ./scripts/bootstrap.sh desktop
+      - run: ./scripts/build-desktop.sh
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/melonDS/build/melonDS dist/
+          tar -czf psz-melonmix-linux-x86_64.tar.gz -C dist melonDS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: psz-melonmix-linux-x86_64.tar.gz
+
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: msys2 {0}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            git base-devel
+            mingw-w64-x86_64-toolchain mingw-w64-x86_64-cmake
+            mingw-w64-x86_64-ninja mingw-w64-x86_64-qt6-base
+            mingw-w64-x86_64-qt6-multimedia mingw-w64-x86_64-qt6-svg
+            mingw-w64-x86_64-SDL2 mingw-w64-x86_64-libarchive
+            mingw-w64-x86_64-zstd mingw-w64-x86_64-enet
+            mingw-w64-x86_64-libslirp mingw-w64-x86_64-faad2
+            mingw-w64-x86_64-extra-cmake-modules
+      - run: ./scripts/bootstrap.sh desktop
+      - run: ./scripts/build-desktop.sh
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/melonDS/build/melonDS.exe dist/
+          # Bundle the runtime DLLs, or it will not start off this machine.
+          ldd dist/melonDS.exe | grep -i mingw64 | awk '{print $3}' | xargs -I{} cp {} dist/ || true
+          /mingw64/share/qt6/bin/windeployqt.exe dist/melonDS.exe || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: dist/
+
+  android:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - name: Install NDK
+        run: sdkmanager --install "ndk;29.0.14206865" "cmake;3.22.1"
+      - run: ./scripts/bootstrap.sh android
+      - run: ./scripts/build-android.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: android
+          path: build/melonDS-android/app/build/outputs/apk/**/*.apk
+
+  # GPLv3: shipping binaries obliges us to ship the corresponding source. The
+  # patches alone are thin cover — if an upstream rev ever disappears, a release
+  # stops being reproducible. So every build also produces the assembled tree.
+  source:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/bootstrap.sh desktop
+      - name: Assemble source tarball
+        run: |
+          rm -rf build/melonDS/.git
+          tar -czf psz-melonmix-source.tar.gz build/melonDS psz integration scripts upstreams.toml LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source
+          path: psz-melonmix-source.tar.gz

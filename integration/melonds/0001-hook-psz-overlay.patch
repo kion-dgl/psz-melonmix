@@ -1,0 +1,58 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index d322e2b1..c381c301 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,6 +34,7 @@ add_library(core STATIC
+     GBACart.cpp
+     GBACartMotionPak.cpp
+     GPU.cpp
++    PSZPlugin.cpp
+     GPU_Soft.cpp
+     GPU2D.cpp
+     GPU2D_Soft.cpp
+diff --git a/src/frontend/qt_sdl/CMakeLists.txt b/src/frontend/qt_sdl/CMakeLists.txt
+index 31207f86..9410e9c2 100644
+--- a/src/frontend/qt_sdl/CMakeLists.txt
++++ b/src/frontend/qt_sdl/CMakeLists.txt
+@@ -6,6 +6,7 @@ set(SOURCES_QT_SDL
+     main.cpp
+     main_shaders.h
+     Screen.cpp
++    PSZOverlayQt.cpp
+     Window.cpp
+     EmuInstance.cpp
+     EmuInstanceAudio.cpp
+diff --git a/src/frontend/qt_sdl/Screen.cpp b/src/frontend/qt_sdl/Screen.cpp
+index 3413496f..eac1953d 100755
+--- a/src/frontend/qt_sdl/Screen.cpp
++++ b/src/frontend/qt_sdl/Screen.cpp
+@@ -38,6 +38,7 @@
+ #include "GPU3D_OpenGL.h"
+ #include "Platform.h"
+ #include "Config.h"
++#include "PSZOverlayQt.h"
+ 
+ #include "main_shaders.h"
+ #include "OSD_shaders.h"
+@@ -823,6 +824,21 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
+             painter.setTransform(screenTrans[i]);
+             painter.drawImage(screenrc, screen[screenKind[i]]);
+         }
++
++        // psz-melonmix: the core plugin decides what to show, this frontend
++        // draws it in window pixels anchored to the top screen's on-window rect.
++        {
++            PSZ::Frame psz = PSZ::Update(emuInstance->getNDS());
++            for (int i = 0; psz.active && i < numScreens; i++)
++            {
++                if (screenKind[i] != 0) continue;   // top screen only
++                QRectF top = screenTrans[i].mapRect(QRectF(0, 0, 256, 192));
++                painter.resetTransform();
++                PSZ::DrawOverlayQt(painter, screen[1], top, psz);
++                break;
++            }
++        }
++
+         emuInstance->renderLock.unlock();
+     }
+ 

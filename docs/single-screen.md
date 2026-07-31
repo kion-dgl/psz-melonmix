@@ -1,0 +1,320 @@
+# Issue: Single-screen presentation (composite bottom-screen HUD onto widescreen top)
+
+**Goal:** make PSZ pleasant to play/capture on one screen. Core gameplay is the
+3D top screen; the bottom screen is mostly HUD + map + menus. Composite the
+bottom-screen elements onto the top.
+
+**Approach: composite, not reconstruct.** Blit 2D engine-B layers onto the top
+screen — reuse the game's own rendering, no HUD reimplementation (that's psz-godot's
+job). Read memory only for scene detection and the controller hacks.
+
+## Done
+- [x] 2D layer isolation — `patches/0002`, `GPU2D::DebugLayerMask` via env
+      `PSZ_LAYER_MASK_B` (bit0-3=BG0-3, bit4=OBJ). Verified headless.
+- [x] `tools/layer-dump.sh` — screenshot each isolated engine-B layer.
+- [x] **First pixels on the top screen** — `patches/0003`, opt-in via
+      `PSZ_HUD_OVERLAY=1`. Draws name, level and HP/PP bars onto the top screen,
+      read straight out of emulated main RAM in `ScreenPanelNative::paintEvent`.
+      Deliberately janky: fixed position, Qt text, no art.
+
+- [x] **The game's own minimap PORTED to the top-right** (the default) — a
+      sub-rect of the bottom screen (`143,109` 66x67, override with
+      `PSZ_HUD_MAPRECT="x,y,w,h"`) blitted onto the top screen. kion's question
+      was whether this is an element where we just change where it is drawn, and
+      it is: `screen[1]` is already a QImage of the bottom screen inside
+      `paintEvent`, so the port is one `drawImage` with a source rect.
+      **This is the composite path beating the reconstruction path outright** —
+      it gets the real room outline, the door markers with gate colours, the
+      enemy dots and the player arrow, all correct by construction, and none of
+      it blocked on the current-room index.
+- [x] **Modal states present the whole bottom screen** — start menu, item menu,
+      Mag, shop, quest counter, title, file select. This is the difference
+      between ugly and *unusable*: in single-screen mode the bottom screen is not
+      on the display at all, so a shop or the quest counter had nothing to
+      interact with. Now the corner overlay is replaced by the bottom screen
+      itself, centred and scaled to 88% of screen height, over a dimmed field.
+      `PSZ_HUD_NOMODAL=1` disables it. **Sized at 66% with a light dim
+      (`PSZ_MODAL_SCALE`, `PSZ_MODAL_DIM`)** so the top screen stays readable
+      around it — the PSO-style first pass. Verified on character create: the
+      "Create Character" heading, the race description and the character art are
+      all legible at once with the menu centred, where an 88% modal buried them.
+
+  The test needs no overlay images and no new RE: the player object pointer
+  `*(0x02108D04)` is NULL in every mode that is not the main game — which covers
+  shops, the quest counter, the title and file select — and inside the main game
+  `*(player+0x280)` reads 5 whenever a full-screen menu is up. Either condition
+  means "the bottom screen is what the player is looking at". Verified: the Main
+  Menu presents full-size, and the field still draws the corner overlay.
+- [x] **The minimap rect now includes the key counter row** beneath it (icon, x,
+      count) — the room's remaining-key indicator, which the top screen carried
+      nowhere else. Eleven more source rows rather than a new element.
+- [x] **Player panel ported to the top-left** — source rect `2,4` 124x50,
+      override `PSZ_HUD_PANELRECT`. Replaces the hand-drawn gauges, which move to
+      `PSZ_HUD_DRAWGAUGES=1`. **Every corner is now the game's own art, and no
+      element in the default overlay requires any RE.** The drawn gauges remain
+      the only version that can be restyled or scaled independently of the
+      game's layout, which is why they are kept rather than deleted.
+- [x] **Action palette ported to the bottom-right** — same one-line move as the
+      minimap. Source rect `128,6` 124x54, override `PSZ_HUD_PALRECT`.
+- [x] **Target box hides when empty** — the game draws it whether or not anything
+      is locked on, and there is no flag to read, but an empty box is a light
+      panel with no dark glyphs and text is near-black. Counting dark pixels in
+      the inset interior separates them with no RE. Confirmed both ways: present
+      reading "Garapython / Attribute:Native" in a field, and absent in town.
+- [x] **SELECT toggles the area map** — centred on the top screen at 50% opacity
+      (`PSZ_MAP_OPACITY`), sized to 55% of screen height, so the field stays
+      readable underneath while navigating. `PSZ_HUD_AREAMAP=1` pins it on.
+
+  **SELECT was chosen by measurement, not assumption.** With the game idle,
+  pressing SELECT changed 78 pixels of the bottom-screen HUD against an idle
+  drift of 90 — i.e. nothing above noise. X changed 227, roughly 2.5x the drift,
+  so X is probably bound to something and was left alone. The toggle only *reads*
+  `KeyInput` (active-low, SELECT is bit 2) and does not intercept it, so if
+  SELECT does turn out to act in a context not tested here, the game still gets
+  it.
+- [x] **Target info ported to the bottom-left** — the locked-on enemy's name and
+      attribute. Source rect `2,96` 124x56, override `PSZ_HUD_TGTRECT`. Verified
+      in-frame: the ported box read "Garapython / Attribute:Native" while the
+      game's own box on the bottom screen read the same. Blank when nothing is
+      targeted, which is what the game does, so there is no state to gate on.
+      This is the first ported element that adds information the top screen did
+      not already carry, rather than relocating something already visible.
+
+  The four corners are now: gauges top-left (the one remaining hand-drawn
+  element), room minimap top-right, target info bottom-left, action palette
+  bottom-right.
+- [x] **The overlay is anchored in WINDOW pixels, not DS pixels** — this is the
+      fix for it feeling cramped, and it is the whole reason raising the
+      resolution helps. Drawn in the DS's 256x192 space a 104px panel is 40% of
+      the screen at *every* output resolution: the picture got bigger and the
+      overlay grew exactly in step, so more pixels bought nothing. Anchored to
+      the top screen's on-screen rect and sized in real pixels, resolution
+      genuinely buys room. `PSZ_HUD_SCALE` (default 2.0) trades element size
+      against it directly.
+- [x] **Compare mode** — `PSZ_COMPARE=1` puts the 16:9 top screen beside the
+      bottom screen, so a ported element can be checked against the original it
+      was copied from in the same frame. `PSZ_TOPONLY=1` remains the
+      single-screen goal. Both default to a 1920x1080 display.
+- [x] **16:9 widescreen** — `PSZ_WIDESCREEN=1`. From the cheat DB's "16:9
+      Widescreen": if the u16 at `0x020346E0` is `0x1555`, write `0x1C71`.
+      7281/5461 = 1.3333, exactly 16:9 over 4:3, so that value is the 3D
+      projection's aspect term. Applied per frame the way an AR code would be,
+      so no cheat-file wiring is needed.
+- [x] **Single-screen presentation** — `PSZ_TOPONLY=1` sets `ScreenSizing=4`
+      (TopOnly) and `ScreenAspectTop=1` (16:9), widens Xvfb to 1280x720 and
+      **resizes the window explicitly**. Fullscreen is only a request and there
+      is no window manager on the Xvfb display to honour it, so without the
+      resize a wide display just shows a 256x192 picture in the corner. The
+      resize is what fires `resizeEvent`, which is what recomputes the layout.
+- [x] **Hand-drawn room minimap**, now behind `PSZ_HUD_DRAWMAP=1` — the current room with a player
+      arrow, from position `player+0x9C` / `+0xA4` (1.19.12) and yaw `+0xC0`
+      (65536/turn, 0 = +Z toward +X, psz-re `sys.facing-convention`). Verified
+      against the game's own room panel in the same frame: with yaw exactly 0 the
+      game draws its arrow pointing up and so does this one, and the position
+      lands low-left in both. The room **outline** is not drawn — see the block
+      below.
+- [x] **Area grid, opt-in via `PSZ_HUD_AREAMAP=1`** — takes the same top-right
+      slot. Off by default because it shows the whole generated layout including
+      rooms never visited, which the game's own map deliberately does not.
+      Drawn from the room table
+      (`*(*(0x02108C64))`, count at `+0x410`, 0x34-byte records, cell at
+      `+0x2E`/`+0x2F`, exits `+0x18..+0x1B`, gates `+0x1C..+0x1F`).
+
+### What the map settles, and what it refutes
+
+**The geometry is right, checked against the game's own map.** In the 8-room
+Gurhacia state the overlay draws exactly the eight cells the table holds — B4,
+B3, B2, A3, C3, D3, D2, B1 — and room 0's north exit leads to B3, which confirms
+**north = row − 1**. That was a guess when the code was written and is now
+checked.
+
+**`+0x414` is NOT the current room — refuted.** It was the only word in the
+field manager that is always a valid room index and varies between states, so it
+was the obvious candidate. In that same state it reads **6**, which is cell D2, a
+dead end at the far side, while the game's own area map puts the player in
+**B4** (room 0). The overlay now draws no "you are here" at all: a wrong one is
+worse than none. Finding the real field is psz-re's to do.
+
+**The game's map only shows visited rooms; this one shows the whole layout.**
+Not a bug, but it does reveal unexplored geometry, so it is a design decision to
+make deliberately rather than inherit.
+
+**The area map screen does not set the menu flag.** The overlay stayed visible
+with the Map screen open, so `*(player + 0x280)` is not 5 there. psz-re's note
+that dialogue and cutscenes are untested should be widened: the flag covers the
+main/item/Mag menus, and the map screen is a fourth full-screen UI that it does
+*not* cover.
+
+`PSZ_HUD_FAKEMAP=1` fills a known layout without touching RAM. It is how the
+renderer was separated from the read path when the map first failed to draw, and
+it is worth keeping for the next element.
+
+### What 0003 settles
+
+**The read path is free.** Inside the emulator there is no GDB stub and no core
+halt — the overlay reads a handful of bytes per frame in the paint path. The
+stub's per-sample halt only constrains *external* tooling, not this.
+
+**Reconstruct-from-memory works, and it self-verifies.** In one frame the
+overlay reported `Lv 1, HP 82/82, PP 67/67` on the top screen while the game's
+own panel on the bottom screen showed the same three values. Two independent
+paths to the same numbers in the same frame is the cheapest possible oracle, and
+it is available on every future element.
+
+**The menu gate works.** `*(*(0x02108D04) + 0x280) == 5` hides the overlay while
+a full-screen menu is up, and it returns on close — measured as bright pixels in
+the overlay region across three consecutive states: 849 gameplay, 319 menu, 850
+after closing.
+
+Offsets came from psz-re and were checked statically against every savestate in
+`sandbox*/` *before* any C++ was written — 41 of 41 in-game states plausible,
+3 null player pointers (the non-`ov04` modes), menu flag only ever 1 or 5. That
+ordering is worth keeping: an address bug and a rendering bug at the same time
+are much harder to separate than either alone.
+
+## TODO
+- [ ] **Grow the overlay element by element**, each one verified against the
+      bottom screen in the same frame the way HP/PP was. Next: PB gauge (byte
+      `panel+0x05` per psz-re's `sys.local-player-panel`, still needs the panel
+      object pointer), then the minimap from the room table.
+- [ ] **Position and art** — the overlay is currently 104px in the top-left
+      corner over the scene. Once widescreen lands it belongs in a margin.
+- [ ] **Find the real current-room field** (psz-re) — this is now the single
+      blocker on the room minimap's outline: the shape and rotation live in the
+      current room's record and nothing knows the index. `+0x414` is refuted
+      above. Three further searches came up empty and are recorded so they are
+      not repeated:
+      - *No pointer to the current room record exists in main RAM.* Scanning all
+        4 MB across 16 multi-room states for a u32 equal to `base + i*0x34`
+        leaves exactly one survivor, `0x02243E30`, which is just the table base.
+      - *A bare index is unfindable with the states on disk.* 1.16 M byte offsets
+        survive "always < count", because a small integer matches everywhere.
+      - *The cell-pair search finds only `base + 0x2E`* — room 0's own cell.
+      The reason all three fail is the same: **in every savestate on disk the
+      player is still in room 0**, so nothing distinguishes "current room" from
+      the constant 0. **What would settle it: one savestate taken in a second
+      room.** That is a capture task, not an RE task.
+- [ ] **The GDB stub never resumes the core once attached.** After `cont()` and
+      after the client detaches, frames stop advancing — two screenshots two
+      seconds apart are byte-identical. So injecting state over the stub and then
+      screenshotting the result does not work: every shot is a frozen frame from
+      before the write. This cost an hour here; the way round it was to build the
+      major-13 fork and load a real field instead.
+- [ ] **Savestate major version splits the test corpus.** The patched build is
+      major 14 and can load only 5 of the 45 states on disk (a town and two
+      arenas — no multi-room field). `patches/0003` applies to `melonDS-ss13`
+      with `patch --fuzz=5` and builds, which is how the map got tested on real
+      data. Worth keeping both builds patched.
+- [ ] **`--savestate` in `gdb-headless.sh` is dead code** — it passes
+      `--loadstate` to melonDS, which has no such option, so the emulator dies
+      with `Unknown option 'loadstate'`. Use `--state` (installs slot 8) + F8.
+      Either wire it to the same mechanism or drop the flag.
+- [ ] **Live layer-toggle hotkeys** (no relaunch per layer) — faster than the env sweep.
+- [ ] **Identify which BG/OBJ holds each HUD element** (map, HP/PP, status, item
+      shortcuts, menus) — sweep the mask, match against the DashGL psz-asset-viewer.
+- [ ] **`detectGameScene()`** — field / menu / dual (title, char-create, char-select
+      stay dual-screen; they don't need compositing). *Needs the game's scene/mode
+      variable* → RE / psz-re.
+- [ ] **Composite** the identified HUD layers onto the widescreen top, per scene.
+      Pairs with the 16:9 widescreen cheat (wide 3D + HUD in corners).
+- [x] ~~**Controller → touch input hook**~~ — **effectively closed, and it was
+      never as large as this entry assumed.** It read "enumerate *all* touch-only
+      actions (map, item shortcuts, word-select chat) and map each", which framed
+      touch as a broad blocker needing the touch handler and its hitbox
+      coordinates from RE. Per kion, who has played the game: **the area map was
+      the only thing that expected touch.** Item shortcuts and word-select are
+      reachable from buttons.
+
+      That single case is already served — SELECT toggles the drawn area map — so
+      no touch injection, no hitbox coordinates and no RE are needed for
+      single-screen play. Modal screens (menus, shop, quest counter) are driven
+      by d-pad and buttons and work under the modal presentation.
+
+      Confidence: this is kion's report from play, not a measurement. What would
+      confirm it: drive a shop and the quest counter to completion with buttons
+      only. Recorded as a claim rather than a verified fact because the previous
+      version of this entry was wrong in the expensive direction, and being wrong
+      the other way would be found the moment someone tries to buy something.
+- [ ] **PSO-style modal menus** (kion's idea, for after the first pass). The
+      current modal presentation blows the whole bottom screen up to 88% of
+      screen height, which is correct and readable but takes the entire view.
+      PSO instead keeps the field visible around a menu that occupies only part
+      of the screen. Two routes, and they differ in cost by a lot:
+      - *Cheap:* shrink and reposition the modal blit, and drop the dimming, so
+        the game's own menu art sits over a still-visible field. No RE, and it is
+        a few lines on `pszDrawModal`.
+      - *Expensive:* recompose the menu from its constituent panels so the layout
+        itself changes rather than just its size. That needs the menu's own
+        sub-rects, and they move per menu.
+      Start with the cheap one — it may well be enough, and it is reversible.
+- [ ] Handle the resolution mismatch (hi-res 3D + fixed low-res 2D HUD) — scale for
+      now; reconstruct hi-res HUD later (optional, uses the extracted assets).
+
+## Architecture — the game knowledge is in the CORE
+
+`melonDS/src/PSZPlugin.{h,cpp}` holds everything PSZ-specific: the addresses, the
+mode test, the room table read, the widescreen poke and the SELECT toggle.
+`PSZ::Update(nds)` is called once per frame and returns a `Frame` describing what
+to draw — a list of source rects with the corner each belongs to, a modal flag,
+and the room graph. The Qt frontend contains no game addresses at all any more.
+
+**Drawing deliberately stayed in the frontend.** Compositing in the core would
+mean writing into the 256x192 framebuffer, where a 70px panel is 27% of the
+screen at *every* output resolution — which is exactly the crowding that
+anchoring the overlay in window pixels fixed. So the core decides *what* and
+*where from*; the frontend decides *how big*, at its own resolution.
+
+That is what makes the Android port tractable: melonDS-android shares `src/`, so
+it inherits `PSZPlugin` and has to implement drawing only — four scaled blits, a
+full-screen blit for modals, and a grid of rectangles. No game knowledge crosses
+over, and no address gets re-derived.
+
+## Front-to-end flow, walked under the single-screen overlay
+
+All of it works. Booted cold and driven with buttons only, no touch:
+
+| Scene | Result |
+|---|---|
+| Intro / attract | plays, then START skips to title |
+| **Title** | PRESS START art presented, logo dimmed behind |
+| **File select** | three slots, Friend Roster, WFC Settings — readable and selectable |
+| **Character create** | race select (Human / CAST / Newman) with art behind |
+| **Quest counter** (`ov12`) | area select — Gurhacia Valley, description, difficulty stars |
+
+**A psz-re claim is contradicted by this.** `docs/game-state.md` says under Traps:
+"The title screen runs with the bottom screen off, while file select uses both",
+and offers reading the display control registers as a way to separate the
+pre-game sub-states. The title screen's bottom screen is **not** off — it carries
+the PRESS START art, which is what the modal presentation shows. The top screen
+holds the logo. So that discriminator does not work as written, and
+`game-state.md`'s own scene table ("Title | logo | press start") already
+disagreed with its Traps section.
+
+**The one real limitation, and it is the same one in every pre-game screen.**
+These are *split* scenes: the top screen carries real content — the character
+description in create, the "Select an area." prompt and Quest Counter heading at
+the counter, the logo at the title — and presenting the bottom screen at 88% of
+screen height covers it. Nothing is unusable, but information is hidden that the
+dual-screen original shows.
+
+This is exactly the case the PSO-style partial modal solves, and it is a better
+argument for it than aesthetics: a smaller menu that leaves the top screen
+readable would make these screens *complete*, not just prettier.
+
+## Observed scenes (from play, not RE)
+| Scene | Top screen | Bottom screen |
+|---|---|---|
+| Title | logo | "press start" |
+| File select | character preview (3D) | the three save files |
+
+Both are **split** scenes, not top-only — real content lives on each screen. So a
+blanket "blit bottom onto top" is wrong even for the menus, and `detectGameScene()`
+is required before any compositing, not just an optimisation for the field.
+
+## Notes
+- Area-map vs room-map: tapping opens the *area* map; the button hook should
+  trigger that.
+- The hard half (rendering a layer in isolation) is done; blitting to the top is
+  the easy half.
+- Bidirectional with psz-re: layer isolation (dynamic) says "map = BG1"; the decomp
+  (static) finds the code that draws it, the scene flag, and the touch region.

@@ -1,0 +1,27 @@
+diff --git a/app/src/main/cpp/MelonInstance.cpp b/app/src/main/cpp/MelonInstance.cpp
+index 8fdc5c4..6913477 100644
+--- a/app/src/main/cpp/MelonInstance.cpp
++++ b/app/src/main/cpp/MelonInstance.cpp
+@@ -8,6 +8,7 @@
+ #include "GPU3D_Compute.h"
+ #include "Configuration.h"
+ #include "DSi.h"
++#include "PSZPlugin.h"
+ #include "DSiSupport.h"
+ #include "DSi_I2C.h"
+ #include "GPU3D_OpenGL.h"
+@@ -352,6 +353,14 @@ u32 MelonInstance::runFrame()
+         int frontbuf = nds->GPU.FrontBuffer;
+         if (nds->GPU.Framebuffer[frontbuf][0] && nds->GPU.Framebuffer[frontbuf][1])
+         {
++            // psz-melonmix: single-screen overlay. The plugin decides what to
++            // show; Composite writes it into the TOP framebuffer before upload,
++            // so no GL work is needed on this side.
++            PSZ::Frame pszFrame = PSZ::Update(nds);
++            PSZ::Composite((u32*) nds->GPU.Framebuffer[frontbuf][0].get(),
++                           (const u32*) nds->GPU.Framebuffer[frontbuf][1].get(),
++                           pszFrame);
++
+             glBindTexture(GL_TEXTURE_2D, renderFrame->frameTexture);
+             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][0].get());
+             glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 192 + 2, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][1].get());

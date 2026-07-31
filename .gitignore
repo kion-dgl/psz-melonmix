@@ -1,0 +1,16 @@
+# Assembled upstream trees — scripts/bootstrap.sh recreates them at pinned revs
+build/
+
+# Copyrighted game data — never commit.
+# Savestates are the sharp edge: a melonDS savestate is a full dump of DS main
+# RAM, so it carries the game's own code and data.
+*.nds
+*.sav
+*.ml[0-9]
+roms/
+bios/
+firmware/
+sandbox*/
+
+dist/
+.DS_Store

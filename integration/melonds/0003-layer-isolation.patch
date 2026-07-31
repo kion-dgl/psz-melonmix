@@ -1,0 +1,43 @@
+diff --git a/src/GPU2D.cpp b/src/GPU2D.cpp
+index 3c9e1161..050c51da 100644
+--- a/src/GPU2D.cpp
++++ b/src/GPU2D.cpp
+@@ -89,6 +89,9 @@ using Platform::LogLevel;
+ 
+ GPU2D::GPU2D(u32 num, melonDS::GPU& gpu) : Num(num), GPU(gpu)
+ {
++    // PSZ: engine-B (and A) 2D layer isolation for HUD compositing R&D.
++    if (const char* m = std::getenv(num == 0 ? "PSZ_LAYER_MASK_A" : "PSZ_LAYER_MASK_B"))
++        DebugLayerMask = (u32)strtoul(m, nullptr, 0);
+ }
+ 
+ void GPU2D::Reset()
+diff --git a/src/GPU2D.h b/src/GPU2D.h
+index 939320fc..11082bbf 100644
+--- a/src/GPU2D.h
++++ b/src/GPU2D.h
+@@ -65,6 +65,9 @@ public:
+     void CalculateWindowMask(u8* windowMask, const u8* objWindow);
+ 
+     u32 Num;
++    // PSZ layer isolation: bits 0-3 = BG0-3, bit 4 = OBJ (0x1F = all on).
++    // Set per engine via env PSZ_LAYER_MASK_A / PSZ_LAYER_MASK_B.
++    u32 DebugLayerMask = 0x1F;
+     bool Enabled;
+ 
+     u32 DispCnt;
+diff --git a/src/GPU2D_Soft.cpp b/src/GPU2D_Soft.cpp
+index 5adc5450..27388b3c 100644
+--- a/src/GPU2D_Soft.cpp
++++ b/src/GPU2D_Soft.cpp
+@@ -330,6 +330,10 @@ void SoftRenderer2D::DrawScanline_BGOBJ(u32 line, u32* dst)
+     else
+         memset(WindowMask, 0xFF, 256);
+ 
++    // PSZ: isolate/hide 2D layers (see GPU2D::DebugLayerMask).
++    if (GPU2D.DebugLayerMask != 0x1F)
++        for (int i = 0; i < 256; i++) WindowMask[i] &= GPU2D.DebugLayerMask;
++
+     ApplySpriteMosaicX();
+     CurBGXMosaicTable = MosaicTable[GPU2D.BGMosaicSize[0]].data();
+ 

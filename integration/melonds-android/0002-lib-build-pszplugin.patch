@@ -1,0 +1,12 @@
+diff --git a/src/CMakeLists.txt b/src/CMakeLists.txt
+index b43d1f8..998600a 100644
+--- a/src/CMakeLists.txt
++++ b/src/CMakeLists.txt
+@@ -34,6 +34,7 @@ add_library(core STATIC
+     GBACart.cpp
+     GBACartMotionPak.cpp
+     GPU.cpp
++    PSZPlugin.cpp
+     GPU2D.cpp
+     GPU2D_Soft.cpp
+     GPU3D.cpp

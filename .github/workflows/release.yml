@@ -1,0 +1,45 @@
+name: release
+
+on:
+  workflow_run:
+    workflows: [build]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    # Only publish something that actually built.
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch build artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          run-id: ${{ github.event.workflow_run.id || github.run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          merge-multiple: true
+
+      - name: Tag
+        id: tag
+        run: echo "name=build-$(date -u +%Y%m%d-%H%M)" >> "$GITHUB_OUTPUT"
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.tag.outputs.name }}
+          name: ${{ steps.tag.outputs.name }}
+          files: artifacts/**/*
+          body: |
+            Automated build of the PSZ single-screen overlay for melonDS.
+
+            **You supply your own ROM.** Nothing here contains game data, and the
+            ROM is never modified — this is a custom melonDS that loads it as normal.
+
+            Contains Linux and Windows desktop builds, an Android APK, and the
+            assembled source tarball (GPLv3 corresponding source).

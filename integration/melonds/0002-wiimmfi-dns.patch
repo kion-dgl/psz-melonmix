@@ -1,0 +1,15 @@
+diff --git a/src/SPI_Firmware.cpp b/src/SPI_Firmware.cpp
+index 6db426cd..52ed40c4 100644
+--- a/src/SPI_Firmware.cpp
++++ b/src/SPI_Firmware.cpp
+@@ -68,6 +68,10 @@ Firmware::WifiAccessPoint::WifiAccessPoint(int consoletype)
+     memset(Bytes, 0, sizeof(Bytes));
+     strncpy(SSID, DEFAULT_SSID, sizeof(SSID));
+     if (consoletype == 1) Mtu = 1400;
++    // PSZ standalone: bake Wiimmfi DNS (178.62.43.212) so Nintendo WFC routes to
++    // the Wiimmfi revival service instead of the dead official servers.
++    PrimaryDns = {178, 62, 43, 212};
++    SecondaryDns = {178, 62, 43, 212};
+     Status = AccessPointStatus::Normal;
+     ConnectionConfigured = 0x01;
+     UpdateChecksum();
