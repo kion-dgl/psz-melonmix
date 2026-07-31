@@ -57,20 +57,85 @@ static bool InMainRAM(NDS* nds, u32 addr)
     return addr >= 0x02000000 && addr <= 0x02000000 + nds->MainRAMMask;
 }
 
-// 16:9, from the cheat DB's "16:9 Widescreen": if the u16 is 0x1555 write
-// 0x1C71. 7281/5461 is 1.3333, exactly 16:9 over 4:3, so this is the projection
-// term rather than anything about the display. Applied per frame as the AR code
-// would be, so no cheat-engine wiring is needed.
-static void ApplyWidescreen(NDS* nds)
+// BAKED-IN CHEATS.
+//
+// This build is a wrapper around one game, so the codes that make that game
+// behave the way we want ship with it rather than being something the player has
+// to find, import and enable. They are applied per frame exactly as melonDS's
+// own cheat engine would, so no cheat file, no UI and no config are involved.
+//
+// The interpreter covers the opcodes this game's codes actually use, which is a
+// small set: 0 = write u32, 1 = write u16, 2 = write u8, 9 = run the following
+// codes only while a masked u16 matches, D2 = end conditional. Anything else is
+// ignored rather than guessed at -- a misinterpreted code writes to an arbitrary
+// address, and silently corrupting emulated RAM is far worse than a cheat that
+// does not fire.
+//
+// Toggle individually with PSZ_CHEAT_<NAME>=0/1.
+struct Cheat
 {
-    // On by default: this is a PSZ-specific build and the 16:9 projection is
-    // the point of it. PSZ_WIDESCREEN=0 turns it off.
-    static const bool on = (std::getenv("PSZ_WIDESCREEN") == nullptr) || EnvSet("PSZ_WIDESCREEN");
-    if (!on) return;
-    u32 o = AspectVal & nds->MainRAMMask;
-    if ((u16)(nds->MainRAM[o] | (nds->MainRAM[o + 1] << 8)) != 0x1555) return;
-    nds->MainRAM[o]     = 0x71;
-    nds->MainRAM[o + 1] = 0x1C;
+    const char* name;
+    const char* env;
+    bool on;                // default
+    const u32* codes;
+    int words;              // total u32s (pairs * 2)
+};
+
+// 16:9 widescreen, from DeadSkullzJr's NDS(i) Cheat Database. 0x1C71/0x1555 is
+// 7281/5461 = 1.3333, exactly 16:9 over 4:3, so the value is the 3D projection's
+// aspect term rather than anything to do with the display.
+static const u32 kWidescreen[] = {
+    0x920346E0, 0x00001555,
+    0x120346E0, 0x00001C71,
+    0xD2000000, 0x00000000,
+};
+
+static const Cheat kCheats[] = {
+    { "16:9 widescreen", "PSZ_CHEAT_WIDESCREEN", true, kWidescreen, 6 },
+};
+static constexpr int NumCheats = sizeof(kCheats) / sizeof(kCheats[0]);
+
+static void Write(NDS* nds, u32 addr, u32 val, int bytes)
+{
+    for (int i = 0; i < bytes; i++)
+        nds->MainRAM[(addr + i) & nds->MainRAMMask] = (u8)(val >> (8 * i));
+}
+
+static void ApplyCheat(NDS* nds, const Cheat& c)
+{
+    bool enabled = c.on;
+    if (const char* v = std::getenv(c.env)) enabled = (*v && *v != '0');
+    if (!enabled) return;
+
+    bool active = true;      // inside a conditional that currently matches
+    for (int i = 0; i + 1 < c.words; i += 2)
+    {
+        const u32 a = c.codes[i], v = c.codes[i + 1];
+        switch (a >> 28)
+        {
+        case 0x0: if (active) Write(nds, a & 0x0FFFFFFF, v, 4); break;
+        case 0x1: if (active) Write(nds, a & 0x0FFFFFFF, v, 2); break;
+        case 0x2: if (active) Write(nds, a & 0x0FFFFFFF, v, 1); break;
+        case 0x9:
+        {
+            // 9AAAAAAA XXXXYYYY -- run what follows only while
+            // (u16 at A) & ~XXXX == YYYY.
+            const u32 addr = a & 0x0FFFFFFF;
+            const u16 cur = (u16)(nds->MainRAM[addr & nds->MainRAMMask] |
+                                 (nds->MainRAM[(addr + 1) & nds->MainRAMMask] << 8));
+            active = ((cur & ~(v >> 16)) == (v & 0xFFFF));
+            break;
+        }
+        case 0xD: active = true; break;   // D2000000: end conditional
+        default: break;                   // unrecognised: skip, never guess
+        }
+    }
+}
+
+static void ApplyCheats(NDS* nds)
+{
+    for (int i = 0; i < NumCheats; i++)
+        ApplyCheat(nds, kCheats[i]);
 }
 
 // SELECT toggles the area map. Chosen by measurement: idle, SELECT moved 78
@@ -120,7 +185,7 @@ Frame Update(NDS* nds)
     Frame f;
     if (!nds || !nds->MainRAM) return f;
 
-    ApplyWidescreen(nds);
+    ApplyCheats(nds);
     f.areaMap = ServiceAreaMapToggle(nds);
 
     // The player object pointer gates everything: it is NULL in every mode that
