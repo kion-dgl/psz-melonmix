@@ -1,0 +1,16 @@
+# Keep everything LF in the working tree on every platform.
+#
+# This exists because of a Windows CI failure that looked like an upstream
+# problem and was not. Git for Windows converts to CRLF on checkout, so the
+# .patch files in THIS repo arrived with CRLF line endings while the upstream
+# tree they apply to was LF. Every hunk failed with "does not apply".
+#
+# Both sides have to agree: bootstrap.sh clones upstream with autocrlf off, and
+# this keeps our own patches and scripts from being rewritten under us.
+* text=auto eol=lf
+
+# Patches are byte-exact by nature — never let git touch them at all.
+*.patch -text
+
+# Shell scripts must keep LF or the shebang line breaks under bash.
+*.sh text eol=lf
