@@ -64,8 +64,11 @@ apply_patches() {
 desktop() {
     local dir="$WORK/melonDS"
     fetch melonds "$dir"
-    cp "$ROOT/psz/PSZPlugin.h" "$ROOT/psz/PSZPlugin.cpp" "$dir/src/"
-    cp "$ROOT/psz/qt/PSZOverlayQt.h" "$ROOT/psz/qt/PSZOverlayQt.cpp" "$dir/src/frontend/qt_sdl/"
+    # Glob rather than naming files: adding PSZOverlayGL.* broke this by being
+    # copied nowhere while the patched CMakeLists referenced it, and cmake failed
+    # at generate time rather than anywhere that pointed at the cause.
+    cp "$ROOT"/psz/*.h "$ROOT"/psz/*.cpp "$dir/src/"
+    cp "$ROOT"/psz/qt/*.h "$ROOT"/psz/qt/*.cpp "$dir/src/frontend/qt_sdl/"
     apply_patches "$dir" "$ROOT/integration/melonds"
     echo ">> desktop tree ready: $dir"
 }

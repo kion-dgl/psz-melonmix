@@ -11,19 +11,20 @@ index d322e2b1..c381c301 100644
      GPU2D.cpp
      GPU2D_Soft.cpp
 diff --git a/src/frontend/qt_sdl/CMakeLists.txt b/src/frontend/qt_sdl/CMakeLists.txt
-index 31207f86..9410e9c2 100644
+index 31207f86..158c6b7a 100644
 --- a/src/frontend/qt_sdl/CMakeLists.txt
 +++ b/src/frontend/qt_sdl/CMakeLists.txt
-@@ -6,6 +6,7 @@ set(SOURCES_QT_SDL
+@@ -6,6 +6,8 @@ set(SOURCES_QT_SDL
      main.cpp
      main_shaders.h
      Screen.cpp
 +    PSZOverlayQt.cpp
++    PSZOverlayGL.cpp
      Window.cpp
      EmuInstance.cpp
      EmuInstanceAudio.cpp
 diff --git a/src/frontend/qt_sdl/Screen.cpp b/src/frontend/qt_sdl/Screen.cpp
-index 3413496f..eac1953d 100755
+index 3413496f..3cb6de25 100755
 --- a/src/frontend/qt_sdl/Screen.cpp
 +++ b/src/frontend/qt_sdl/Screen.cpp
 @@ -38,6 +38,7 @@
@@ -56,3 +57,89 @@ index 3413496f..eac1953d 100755
          emuInstance->renderLock.unlock();
      }
  
+@@ -989,6 +1005,8 @@ void ScreenPanelGL::initOpenGL()
+     osdScaleFactorULoc = glGetUniformLocation(osdShader, "uScaleFactor");
+     osdTexScaleULoc = glGetUniformLocation(osdShader, "uTexScale");
+ 
++    pszOverlay.init();   // psz-melonmix
++
+     const float osdvertices[6*2] =
+     {
+         0, 0,
+@@ -1031,6 +1049,8 @@ void ScreenPanelGL::deinitOpenGL()
+ 
+     glContext->MakeCurrent();
+ 
++    pszOverlay.deinit();   // psz-melonmix
++
+     glDeleteTextures(1, &screenTexture);
+ 
+     glDeleteVertexArrays(1, &screenVertexArray);
+@@ -1168,6 +1188,45 @@ void ScreenPanelGL::drawScreen()
+             glDrawArrays(GL_TRIANGLES, screenKind[i] == 0 ? 0 : 2 * 3, 2 * 3);
+         }
+ 
++        // psz-melonmix: same overlay as the QPainter path, on the GL one, so
++        // that hi-res 3D (which forces this path) does not lose the HUD.
++        for (int i = 0; i < numScreens; i++)
++        {
++            if (screenKind[i] != 0) continue;   // top screen only
++
++            // screenMatrix is the affine the screen shader uses. Mind the
++            // layout: it is uploaded with glUniformMatrix2x3fv(..., GL_TRUE)
++            // into a GLSL mat2x3 (2 COLUMNS, 3 rows) and applied as
++            // vec3(pos,1) * M, so column 0 is (m0,m2,m4) and column 1 is
++            // (m1,m3,m5) -- the components interleave rather than splitting into
++            // two halves. Reading it as [m0,m1,m2] / [m3,m4,m5] puts the quads
++            // somewhere off screen and the overlay silently does not appear.
++            //   out.x = m0*x + m2*y + m4 ,  out.y = m1*x + m3*y + m5
++            // Take all four corners so a rotated layout still gives a sane box.
++            const float* m = screenMatrix[i];
++            float xs[4], ys[4];
++            const float cx[4] = {0.f, 256.f, 0.f, 256.f};
++            const float cy[4] = {0.f, 0.f, 192.f, 192.f};
++            for (int k = 0; k < 4; k++)
++            {
++                xs[k] = m[0]*cx[k] + m[2]*cy[k] + m[4];
++                ys[k] = m[1]*cx[k] + m[3]*cy[k] + m[5];
++            }
++            float x0 = xs[0], x1 = xs[0], y0 = ys[0], y1 = ys[0];
++            for (int k = 1; k < 4; k++)
++            {
++                if (xs[k] < x0) x0 = xs[k];
++                if (xs[k] > x1) x1 = xs[k];
++                if (ys[k] < y0) y0 = ys[k];
++                if (ys[k] > y1) y1 = ys[k];
++            }
++
++            PSZMix::Frame psz = PSZMix::Update(nds);
++            const float topRect[4] = {x0, y0, x1 - x0, y1 - y0};
++            pszOverlay.draw(psz, w / factor, h / factor, topRect);
++            break;
++        }
++
+         screenSettingsLock.unlock();
+     }
+ 
+diff --git a/src/frontend/qt_sdl/Screen.h b/src/frontend/qt_sdl/Screen.h
+index e2cae1c7..c74d5adf 100755
+--- a/src/frontend/qt_sdl/Screen.h
++++ b/src/frontend/qt_sdl/Screen.h
+@@ -34,6 +34,8 @@
+ #include "ScreenLayout.h"
+ #include "duckstation/gl/context.h"
+ 
++#include "PSZOverlayGL.h"
++
+ 
+ class MainWindow;
+ class EmuInstance;
+@@ -219,6 +221,8 @@ private:
+     std::unique_ptr<GL::Context> glContext;
+     bool glInited;
+ 
++    PSZMix::OverlayGL pszOverlay;   // psz-melonmix
++
+     GLuint screenVertexBuffer, screenVertexArray;
+     GLuint screenTexture;
+     GLuint screenShaderProgram;
