@@ -63,7 +63,9 @@ static bool InMainRAM(NDS* nds, u32 addr)
 // would be, so no cheat-engine wiring is needed.
 static void ApplyWidescreen(NDS* nds)
 {
-    static const bool on = EnvSet("PSZ_WIDESCREEN");
+    // On by default: this is a PSZ-specific build and the 16:9 projection is
+    // the point of it. PSZ_WIDESCREEN=0 turns it off.
+    static const bool on = (std::getenv("PSZ_WIDESCREEN") == nullptr) || EnvSet("PSZ_WIDESCREEN");
     if (!on) return;
     u32 o = AspectVal & nds->MainRAMMask;
     if ((u16)(nds->MainRAM[o] | (nds->MainRAM[o + 1] << 8)) != 0x1555) return;
