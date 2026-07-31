@@ -1,0 +1,238 @@
+<title>psz-melonmix — behaviour spec</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<style>
+  :root {
+    --bg: #12141a; --panel: #1a1d26; --line: #2b3040;
+    --fg: #e6e8ee; --dim: #98a0b3; --accent: #7cc4ff; --warn: #ffbe6a; --bad: #ff8a8a;
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, monospace;
+  }
+  @media (prefers-color-scheme: light) {
+    :root { --bg:#fbfcfe; --panel:#fff; --line:#dfe4ee; --fg:#161a22; --dim:#5a6478;
+            --accent:#0a63b8; --warn:#8a5a00; --bad:#b02a2a; }
+  }
+  :root[data-theme="dark"] { --bg:#12141a; --panel:#1a1d26; --line:#2b3040; --fg:#e6e8ee;
+            --dim:#98a0b3; --accent:#7cc4ff; --warn:#ffbe6a; --bad:#ff8a8a; }
+  :root[data-theme="light"] { --bg:#fbfcfe; --panel:#fff; --line:#dfe4ee; --fg:#161a22;
+            --dim:#5a6478; --accent:#0a63b8; --warn:#8a5a00; --bad:#b02a2a; }
+
+  body { background: var(--bg); color: var(--fg); margin: 0;
+         font: 16px/1.65 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  .wrap { max-width: 980px; margin: 0 auto; padding: 2.5rem 1.25rem 6rem; }
+  h1 { font-size: clamp(1.7rem, 4vw, 2.4rem); line-height: 1.15; margin: 0 0 .4rem; letter-spacing: -.02em; }
+  h2 { font-size: 1.35rem; margin: 3rem 0 .75rem; padding-top: 1.25rem; border-top: 1px solid var(--line); letter-spacing: -.01em; }
+  h3 { font-size: 1.06rem; margin: 2rem 0 .5rem; }
+  p, li { color: var(--fg); }
+  .lede { color: var(--dim); font-size: 1.08rem; margin-top: 0; }
+  code, .mono { font-family: var(--mono); font-size: .89em; }
+  code { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: .1em .35em; }
+  a { color: var(--accent); }
+
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+          padding: 1rem 1.15rem; margin: 1.25rem 0; }
+  .card.rule { border-left: 3px solid var(--warn); }
+
+  figure { margin: 1.25rem 0; }
+  figure img { width: 100%; height: auto; display: block; border-radius: 8px; border: 1px solid var(--line); }
+  figcaption { color: var(--dim); font-size: .87rem; margin-top: .5rem; }
+
+  .scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; margin: 1rem 0; }
+  table { border-collapse: collapse; width: 100%; font-size: .93rem; }
+  th, td { text-align: left; padding: .5rem .7rem; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { color: var(--dim); font-weight: 600; white-space: nowrap; }
+  td.mono, th.mono { font-family: var(--mono); font-size: .86rem; }
+
+  .tag { display: inline-block; font-size: .74rem; letter-spacing: .04em; text-transform: uppercase;
+         padding: .12em .5em; border-radius: 999px; border: 1px solid var(--line); color: var(--dim); }
+  .tag.ok { color: var(--accent); border-color: currentColor; }
+  .tag.gap { color: var(--bad); border-color: currentColor; }
+  ul { padding-left: 1.15rem; }
+</style>
+
+<div class="wrap">
+
+<h1>psz-melonmix — behaviour spec</h1>
+<p class="lede">What the single-screen build is supposed to do in each state of the
+game, where every element on screen comes from, and how to tell a bug from a
+disagreement about intent.</p>
+
+<div class="card rule">
+  <strong>This document is the contract.</strong> When something looks wrong, find
+  the state below and compare against it before changing any code.
+  <ul>
+    <li>Behaviour differs from this page → <strong>it is a bug</strong>. Fix the code.</li>
+    <li>Behaviour matches this page but is still unwanted → <strong>the spec is
+      wrong</strong>. Correct this page first, in the same change that alters the
+      behaviour. A fix that silently contradicts the spec turns the next bug
+      report into an argument.</li>
+    <li>The state is not described here → say so in the report. An undocumented
+      state is a gap in this page, not a licence to guess.</li>
+  </ul>
+</div>
+
+<h2>How to read the screenshots</h2>
+<p>Every screenshot below is a single frame in <em>compare mode</em>
+(<code>PSZ_COMPARE=1</code>): the wide panel on the left is <strong>our output</strong>,
+and the small panel on the right is <strong>the untouched source</strong> — the
+bottom screen exactly as the game drew it. Nothing is edited between them.</p>
+<p>That pairing is the whole verification method. Every ported element is a
+rectangle copied from the right-hand panel to the left one, so a mismatch is
+visible in one frame without needing a reference image or a second run.</p>
+
+<h2>State detection</h2>
+<p>Which state the build thinks it is in decides everything else, and it is
+decided by two reads. No overlay images, no heuristics.</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Test</th><th>Meaning</th></tr>
+  <tr>
+    <td class="mono">*(0x02108D04) == 0</td>
+    <td><strong>Not the main game.</strong> The player object pointer is null in
+        every other mode — shops, quest counter, title, file select, character
+        create. Present the bottom screen whole.</td>
+  </tr>
+  <tr>
+    <td class="mono">*(player + 0x280) == 5</td>
+    <td><strong>A full-screen menu is open</strong> inside the main game (main
+        menu, item menu, Mag). Present the bottom screen whole. Normal play
+        reads <code>1</code>.</td>
+  </tr>
+  <tr>
+    <td>neither</td>
+    <td><strong>Field or town.</strong> Composite the four corner elements over
+        the top screen.</td>
+  </tr>
+</table>
+</div>
+
+<h2>Field and town <span class="tag ok">specified</span></h2>
+<figure>
+  <img src="img/state-field.png" alt="Field gameplay: overlay output on the left, untouched bottom screen on the right">
+  <figcaption>Field. Left: output, four elements composited onto the widescreen
+  top screen. Right: the source bottom screen they were copied from.</figcaption>
+</figure>
+
+<p><strong>Expected:</strong> four elements in the four corners, the 3D view
+otherwise unobstructed, no dimming. Town behaves identically — the same rects are
+valid there, which was checked rather than assumed.</p>
+
+<div class="scroll">
+<table>
+  <tr><th>Corner</th><th>Element</th><th class="mono">Source rect</th><th>Override</th><th>Notes</th></tr>
+  <tr><td>top-left</td><td>Player panel — level, HP, PP</td><td class="mono">2, 4, 124×50</td><td class="mono">PSZ_HUD_PANELRECT</td><td>the game's own art, not redrawn</td></tr>
+  <tr><td>top-right</td><td>Room minimap + key counter</td><td class="mono">143, 109, 70×80</td><td class="mono">PSZ_HUD_MAPRECT</td><td>includes the room outline, door markers, enemy dots, player arrow</td></tr>
+  <tr><td>bottom-left</td><td>Locked-on target</td><td class="mono">2, 96, 124×56</td><td class="mono">PSZ_HUD_TGTRECT</td><td><strong>hidden when empty</strong> — see below</td></tr>
+  <tr><td>bottom-right</td><td>Action palette</td><td class="mono">128, 6, 124×54</td><td class="mono">PSZ_HUD_PALRECT</td><td>three action octagons and the R tab</td></tr>
+</table>
+</div>
+
+<p>Source rects are in bottom-screen pixels (256×192). Elements are drawn at
+<code>PSZ_HUD_SCALE</code> (default 2.0) in <em>window</em> pixels, not DS pixels
+— so raising the output resolution gives them a smaller share of the screen
+rather than scaling them up with it.</p>
+
+<h3>The target box hides itself</h3>
+<p>The game draws that box whether or not anything is locked on, and there is no
+flag for it. Emptiness is detected by counting dark pixels in the box interior:
+text is near-black, an empty panel is not. <strong>Expected:</strong> present with
+a name and attribute when something is targeted, entirely absent otherwise —
+confirmed both ways, in a field and in town.</p>
+
+<h2>Menus, shops and the counter <span class="tag ok">specified</span></h2>
+<figure>
+  <img src="img/state-mainmenu.png" alt="Main menu presented over a dimmed field">
+  <figcaption>Main menu. The bottom screen is the interaction, so it is presented
+  whole rather than composited into corners.</figcaption>
+</figure>
+<figure>
+  <img src="img/state-counter.png" alt="Quest counter area select">
+  <figcaption>Quest counter (<code>ov12</code>) — the same overlay hosts the shop.</figcaption>
+</figure>
+
+<p><strong>Expected:</strong> the corner elements disappear entirely; the bottom
+screen is drawn centred at <code>PSZ_MODAL_SCALE</code> (default 0.66) over the
+field dimmed by <code>PSZ_MODAL_DIM</code> (default 90/255).</p>
+
+<p><strong>Why 66% and not full-screen:</strong> these are split scenes. The top
+screen carries real content — the race description in character create, the
+"Select an area." prompt at the counter, the logo at the title — and covering it
+hides information the dual-screen original shows. The menu must be readable
+<em>and</em> the top screen must remain readable.</p>
+
+<h2>Single-screen output <span class="tag ok">specified</span></h2>
+<figure>
+  <img src="img/output-field.png" alt="Single-screen output, field">
+  <figcaption>What a player actually sees: <code>PSZ_TOPONLY=1</code>, top screen
+  only, 16:9. This is the default layout — no configuration required.</figcaption>
+</figure>
+<figure>
+  <img src="img/output-areamap.png" alt="Area map overlay toggled on with SELECT">
+  <figcaption>SELECT toggles the area map: centred, 50% opacity
+  (<code>PSZ_MAP_OPACITY</code>), drawn from the game's room table rather than
+  copied from the screen.</figcaption>
+</figure>
+
+<p>The area map is the one element that is <em>reconstructed</em> rather than
+copied, because the game's own area map is a full-screen touch-gated modal that
+only exists while open — there is nothing on screen to copy. Cells come from the
+room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
+
+<h2>Where the values come from</h2>
+<div class="scroll">
+<table>
+  <tr><th class="mono">Address</th><th>Holds</th><th>Used for</th></tr>
+  <tr><td class="mono">*(0x02108D04)</td><td>player object pointer; null outside the main game</td><td>state detection</td></tr>
+  <tr><td class="mono">player + 0x280</td><td>control mode: 1 normal, 5 full-screen menu</td><td>state detection</td></tr>
+  <tr><td class="mono">*(*(0x02108C64))</td><td>room table base</td><td>area map</td></tr>
+  <tr><td class="mono">base + 0x410</td><td>room count (valid range 1–20)</td><td>area map</td></tr>
+  <tr><td class="mono">record + 0x2E / +0x2F</td><td>grid cell, column and row</td><td>area map layout</td></tr>
+  <tr><td class="mono">record + 0x18..0x1B</td><td>exits, N E S W; <code>0xFF</code> = wall</td><td>area map connections</td></tr>
+  <tr><td class="mono">record + 0x1C..0x1F</td><td>gate type; 0 = open, else keyed</td><td>red exit stubs</td></tr>
+  <tr><td class="mono">0x020346E0</td><td>3D projection aspect term; 0x1555 → 0x1C71</td><td>16:9 widescreen</td></tr>
+  <tr><td class="mono">KeyInput bit 2</td><td>SELECT, active low</td><td>area map toggle</td></tr>
+</table>
+</div>
+<p>Records are <code>0x34</code> bytes. Every address above was checked against
+every savestate on disk before being used, not read once and trusted.</p>
+
+<h2>Deliberately not done</h2>
+<div class="scroll">
+<table>
+  <tr><th>Thing</th><th>Why</th></tr>
+  <tr>
+    <td>"You are here" on the area map</td>
+    <td><span class="tag gap">blocked</span> The current-room index has not been
+        found. <code>+0x414</code> looked like it and is <strong>refuted</strong>:
+        it read 6 (a dead-end cell) while the game's own map showed the player in
+        room 0. Drawing a wrong marker is worse than none. Needs a savestate taken
+        in a second room — every one on disk has the player in room 0.</td>
+  </tr>
+  <tr>
+    <td>Party member panels</td>
+    <td><span class="tag gap">unverified</span> No savestate on disk has a party,
+        so the rect cannot be checked in-frame the way every other element was.</td>
+  </tr>
+  <tr>
+    <td>Hi-res 3D by default</td>
+    <td>Works, but only tested under software rasterisation — never on real GPU
+        hardware or a handheld.</td>
+  </tr>
+  <tr>
+    <td>Title, file select, character create screenshots</td>
+    <td><span class="tag gap">gap</span> Walked and confirmed working, but not yet
+        captured here. Until they are, they are undocumented states.</td>
+  </tr>
+</table>
+</div>
+
+<h2>Reporting a bug</h2>
+<p>Include the state name from this page, what you expected from it, and what you
+saw. If the two agree and the behaviour is still wrong, that is a spec change and
+should say so — those are the reports worth having, because they are the ones
+this page cannot answer on its own.</p>
+
+<p style="color:var(--dim);font-size:.9rem;margin-top:2.5rem">
+Source: <a href="https://github.com/kion-dgl/psz-melonmix">github.com/kion-dgl/psz-melonmix</a>.
+You supply your own ROM; nothing here contains game data and the ROM is never modified.</p>
+
+</div>
