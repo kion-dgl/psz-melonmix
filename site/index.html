@@ -177,6 +177,90 @@ copied, because the game's own area map is a full-screen touch-gated modal that
 only exists while open — there is nothing on screen to copy. Cells come from the
 room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
 
+<h2>Pre-game states <span class="tag ok">captured</span></h2>
+
+<figure>
+  <img src="img/state-title.png" alt="Title screen: logo dimmed behind, PRESS START presented over it">
+  <figcaption>Title. <strong>This frame shows bug #1.</strong> The logo is the top
+  screen's content and is being dimmed and covered by the bottom screen.</figcaption>
+</figure>
+
+<figure>
+  <img src="img/state-fileselect.png" alt="File select">
+  <figcaption>File select — correct. The bottom screen carries the choice, so
+  presenting it is right; the top screen's save details stay readable around it.</figcaption>
+</figure>
+
+<figure>
+  <img src="img/state-create.png" alt="Character create">
+  <figcaption>Character create — correct. Race menu presented, with the heading,
+  the description and both portraits still legible.</figcaption>
+</figure>
+
+<h2 id="bugs">Open bugs <span class="tag gap">reported, not yet fixed</span></h2>
+
+<div class="card rule">
+All three come from one root cause, so they should be fixed together rather than
+patched individually. The current rule presents the bottom screen whenever
+<code>*(0x02108D04) == 0</code> or <code>*(player+0x280) == 5</code>. That
+conflates two different situations:
+<ul>
+  <li><strong>the bottom screen is the interaction</strong> — menus, shop,
+      counter, file select, character create. Presenting it is right.</li>
+  <li><strong>the top screen is the content</strong> — cutscenes, dialogue, the
+      title. Presenting the bottom screen actively hides what the player is
+      supposed to be looking at.</li>
+</ul>
+The rule cannot tell them apart, so it gets the second class wrong every time.
+</div>
+
+<div class="scroll">
+<table>
+  <tr><th>#</th><th>State</th><th>Expected</th><th>Actual</th></tr>
+  <tr>
+    <td>1</td><td>Title</td>
+    <td>show the top screen's logo</td>
+    <td>logo dimmed and covered by the bottom screen's PRESS START / © SEGA</td>
+  </tr>
+  <tr>
+    <td>2</td><td>Cutscenes — the opening one before the title, and the one after
+        character creation</td>
+    <td>show the top screen, where the cutscene plays</td>
+    <td>shows the bottom screen, which holds only a small skip prompt in the
+        corner</td>
+  </tr>
+  <tr>
+    <td>3</td><td>Dialogue</td>
+    <td>show the top screen, where the dialogue is drawn</td>
+    <td>shows the bottom screen, which holds only the skip option</td>
+  </tr>
+</table>
+</div>
+
+<h3>Why this needs two signals, not one</h3>
+<p>Neither available test separates the cases on its own:</p>
+<ul>
+  <li><strong>Content density will not fix the title.</strong> Its bottom screen
+      is a full-screen illustration, so "is the bottom screen sparse?" says
+      present it — the wrong answer. Density <em>does</em> separate dialogue
+      (a bare skip prompt) from a menu, which is where it earns its place.</li>
+  <li><strong>The overlay id will not fix dialogue.</strong> Dialogue happens
+      inside <code>ov04</code>, the same overlay as ordinary play, so the mode is
+      identical and only the screen contents differ.</li>
+</ul>
+<p>The fix is therefore the resident overlay at <code>0x0211E640</code> for the
+coarse mode — <code>ov16</code>/<code>ov17</code>/<code>ov00</code>/<code>ov06</code>
+are top-screen states, <code>ov11</code>/<code>ov12</code>/<code>ov14</code> are
+bottom-screen ones — plus a bottom-screen density check to split dialogue from
+menus within <code>ov04</code>. psz-re already established the overlay slot as the
+game's own notion of mode; using it here means baking in a fingerprint per
+overlay so the id can be recovered at runtime without the ROM's overlay images.</p>
+
+<p>Worth recording that psz-re's own notes flagged this: the control-mode field
+was documented as verified for the main, item and Mag menus with <em>dialogue and
+cutscenes untested</em>. This is that untested case turning out to be the one it
+gets wrong.</p>
+
 <h2>Where the values come from</h2>
 <div class="scroll">
 <table>
@@ -216,11 +300,6 @@ every savestate on disk before being used, not read once and trusted.</p>
     <td>Hi-res 3D by default</td>
     <td>Works, but only tested under software rasterisation — never on real GPU
         hardware or a handheld.</td>
-  </tr>
-  <tr>
-    <td>Title, file select, character create screenshots</td>
-    <td><span class="tag gap">gap</span> Walked and confirmed working, but not yet
-        captured here. Until they are, they are undocumented states.</td>
   </tr>
 </table>
 </div>
