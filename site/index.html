@@ -103,12 +103,15 @@ decided by two reads. No overlay images, no heuristics.</p>
         the top screen.</td>
   </tr>
   <tr>
-    <td>either of the above, but the bottom screen is <strong>nearly empty</strong></td>
-    <td><strong>Cutscene or dialogue.</strong> Draw nothing — let the top screen
-        through untouched. Emptiness is measured, not inferred: quantise the
-        bottom screen to RGB444, and if all but under 12%
-        (<code>PSZ_MODAL_MIN_CONTENT</code>) of sampled pixels are the single
-        commonest colour... <em>superseded — see below.</em></td>
+    <td class="mono">CRC32 of 512 bytes at 0x0211E640</td>
+    <td><strong>Which overlay is resident</strong> — and that <em>is</em> the
+        game's mode. <code>ov16</code> cutscene player, <code>ov17</code> dialogue
+        player, <code>ov00</code> title and <code>ov06</code> ending all carry
+        their content on the <strong>top</strong> screen: draw nothing.
+        <code>ov11</code> create, <code>ov12</code> counter/shop and
+        <code>ov14</code> file select present the bottom screen. No match is a
+        <em>transient</em> during the overlay's DMA, not a mode — hold the last
+        known id.</td>
   </tr>
 </table>
 </div>
@@ -205,7 +208,7 @@ room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
   the description and both portraits still legible.</figcaption>
 </figure>
 
-<h2 id="bugs">Open bugs <span class="tag gap">reported, not yet fixed</span></h2>
+<h2 id="bugs">Reported bugs <span class="tag ok">all fixed</span></h2>
 
 <div class="card rule">
 All three come from one root cause, so they should be fixed together rather than
@@ -228,76 +231,46 @@ The rule cannot tell them apart, so it gets the second class wrong every time.
   <tr>
     <td>1</td><td>Title</td>
     <td>show the top screen's logo</td>
-    <td>logo dimmed and covered by the bottom screen's PRESS START / © SEGA</td>
+    <td><strong>FIXED</strong> — <code>ov00</code>. Verified: the logo fills the screen.</td>
   </tr>
   <tr>
     <td>2</td><td>Cutscenes — the opening one before the title, and the one after
         character creation</td>
     <td>show the top screen, where the cutscene plays</td>
-    <td><strong>FIXED.</strong> Verified on the SEGA splash: the top screen now
-        shows plain where the near-blank bottom screen used to cover it.</td>
+    <td><strong>FIXED</strong> — <code>ov16</code>. Verified on the captured
+        opening-cutscene savestate.</td>
   </tr>
   <tr>
     <td>3</td><td>Dialogue</td>
     <td>show the top screen, where the dialogue is drawn</td>
-    <td><strong>Fix applied, not yet verified</strong> — it takes the same path as
-        the cutscenes, but no savestate mid-dialogue exists to confirm it on.</td>
+    <td><strong>FIXED</strong> — <code>ov17</code>. Verified on the captured Kai
+        dialogue savestate.</td>
   </tr>
 </table>
 </div>
 
-<h3>The measure is dark text, and the first attempt measured the wrong thing</h3>
-<p>The first version measured <strong>colour variety</strong> — how much of the
-bottom screen is not its commonest colour — assuming a cutscene's bottom screen
-is close to a flat fill. Measured on a real opening cutscene, it is not:</p>
-<div class="scroll">
-<table>
-  <tr><th>State</th><th class="mono">colour variety</th><th class="mono">dark text</th></tr>
-  <tr><td>opening cutscene</td><td class="mono">0.82</td><td class="mono">0.010</td></tr>
-  <tr><td>file select</td><td class="mono">0.69</td><td class="mono">0.093</td></tr>
-  <tr><td>character create</td><td class="mono">0.64</td><td class="mono">0.168</td></tr>
-</table>
-</div>
-<p>The cutscene has the <em>highest</em> colour variety of the three — it is a
-large pastel panel with faint patterning — so the first check called it dense and
-presented it, which is the bug it was written to fix. What separates them is
-<strong>dark text</strong>: real UI is near-black glyphs on light panels, and the
-cutscene filler is low contrast throughout. Threshold 0.045, tunable with
-<code>PSZ_MODAL_MIN_TEXT</code>.</p>
-
-<h3>Why the check is not "is the HUD drawn"</h3>
-<p>The obvious test is whether the field HUD is present in the rects we are about
-to copy. It is the wrong test: <strong>opening the Start menu removes that
-HUD</strong>, so a menu would read as "not a UI" and be passed through — trading
-three bugs for a worse one.</p>
-<p>Emptiness is the property the decision actually rests on. A menu is dense
-whether or not it contains the field HUD; a cutscene's bottom screen is close to
-a flat fill. That also leaves the check indifferent to <em>which</em> UI is on the
-bottom screen, so a menu nobody has catalogued still behaves correctly.</p>
-
-<h3>Why the title still needs a second signal</h3>
-<p>Neither available test separates the cases on its own:</p>
+<h3>Two pixel heuristics failed before the mode was read directly</h3>
+<p>Both are recorded because each looked verified before it was tested on the
+case that mattered.</p>
 <ul>
-  <li><strong>Content density will not fix the title.</strong> Its bottom screen
-      is a full-screen illustration, so "is the bottom screen sparse?" says
-      present it — the wrong answer. Density <em>does</em> separate dialogue
-      (a bare skip prompt) from a menu, which is where it earns its place.</li>
-  <li><strong>The overlay id will not fix dialogue.</strong> Dialogue happens
-      inside <code>ov04</code>, the same overlay as ordinary play, so the mode is
-      identical and only the screen contents differ.</li>
+  <li><strong>Colour variety</strong> assumed a cutscene's bottom screen is close
+      to a flat fill. It is the densest of the three states measured (0.82, against
+      0.69 for file select and 0.64 for create) — a large pastel panel. It passed
+      review only because it was first tried on the SEGA splash, which really is
+      blank.</li>
+  <li><strong>Dark-text density</strong> fixed the cutscenes and then hid the
+      <em>"This character will be created. Is that OK?"</em> confirmation, because
+      that prompt is small text on a white panel. Trading three bugs for a new one.</li>
 </ul>
-<p>The fix is therefore the resident overlay at <code>0x0211E640</code> for the
-coarse mode — <code>ov16</code>/<code>ov17</code>/<code>ov00</code>/<code>ov06</code>
-are top-screen states, <code>ov11</code>/<code>ov12</code>/<code>ov14</code> are
-bottom-screen ones — plus a bottom-screen density check to split dialogue from
-menus within <code>ov04</code>. psz-re already established the overlay slot as the
-game's own notion of mode; using it here means baking in a fingerprint per
-overlay so the id can be recovered at runtime without the ROM's overlay images.</p>
+<p>Both were inferring the mode from what came out of the renderer. The overlay
+slot <em>is</em> the mode, so it is read directly and no threshold exists to tune.</p>
 
-<p>Worth recording that psz-re's own notes flagged this: the control-mode field
-was documented as verified for the main, item and Mag menus with <em>dialogue and
-cutscenes untested</em>. This is that untested case turning out to be the one it
-gets wrong.</p>
+<h3>What the captures settled</h3>
+<p>Two savestates — the opening cutscene and the Kai dialogue — put them in
+<code>ov16</code> and <code>ov17</code>, both with a <strong>NULL player
+object</strong>. That also refuted this project's own assumption that dialogue ran
+inside <code>ov04</code> with control mode 5, which is why every earlier fix
+targeted the wrong branch.</p>
 
 <h2>Where the values come from</h2>
 <div class="scroll">

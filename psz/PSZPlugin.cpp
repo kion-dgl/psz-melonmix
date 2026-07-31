@@ -17,6 +17,7 @@
 #include "PSZPlugin.h"
 #include "NDS.h"
 #include "GPU.h"
+#include "PSZOverlayIDs.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -133,58 +134,67 @@ static void ApplyCheat(NDS* nds, const Cheat& c)
     }
 }
 
-// Is the bottom screen worth presenting?
+// WHICH OVERLAY IS RESIDENT -- the game's own notion of its mode.
 //
-// The modal rule -- null player object, or control mode 5 -- says "the bottom
-// screen is the interaction". Right for menus, shops and the counter; wrong for
-// cutscenes and dialogue, where the top screen carries the content and the
-// bottom holds a skip prompt over decorative filler.
+// ov00..ov18 all load at 0x0211E640, one mutually-exclusive slot, so exactly one
+// is resident and which one it is IS the mode (psz-re docs/game-state.md).
+// Recognised by CRC32 of its first 512 bytes against a generated table, so no
+// overlay image and no game data ships.
 //
-// The measure is DARK-TEXT DENSITY, and the first attempt got this wrong in an
-// instructive way. It measured colour variety -- how much of the screen is not
-// its commonest colour -- on the assumption that a cutscene's bottom screen is
-// close to a flat fill. It is not. Measured on a real opening cutscene:
-//
-//     cutscene     colour-variety 0.82   dark-text 0.010
-//     file select  colour-variety 0.69   dark-text 0.093
-//     char create  colour-variety 0.64   dark-text 0.168
-//
-// The cutscene has the HIGHEST colour variety of the three, because it is a
-// large pastel panel with faint patterning -- so variety called it dense and
-// presented it, which is the bug it was meant to fix. What actually separates
-// them is dark text: real UI is near-black glyphs on light panels, and the
-// cutscene's filler is low contrast throughout.
-//
-// This also deliberately does NOT test for the field HUD. Opening the Start menu
-// removes that HUD, so a HUD test would misread a menu as "not a UI" -- kion
-// caught that before it was written.
-static bool BottomScreenHasContent(NDS* nds)
+// This replaces two failed pixel heuristics. Colour variety called a cutscene
+// dense because its bottom screen is a large pastel panel; dark-text density
+// then hid the "create this character?" confirmation because that prompt is
+// small on a white panel. Both were guessing at the mode from what came out of
+// the renderer. This reads the mode itself.
+static u32 Crc32(const u8* p, int n)
 {
-    // GetFramebuffers returns false with an accelerated 3D renderer, where the
-    // frame lives in a GL texture and there is nothing to sample on the CPU.
-    // Assume content rather than guessing -- that keeps the previous behaviour
-    // instead of blanking a screen we cannot inspect.
-    void* topbuf = nullptr; void* bottombuf = nullptr;
-    if (!nds->GPU.GetFramebuffers(&topbuf, &bottombuf) || !bottombuf) return true;
-    const u32* bottom = (const u32*)bottombuf;
-
-    int dark = 0, total = 0;
-    for (int y = 0; y < 192; y += 2)
-        for (int x = 0; x < 256; x += 2)
-        {
-            const u32 c = bottom[y * 256 + x];
-            const int sum = ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
-            if (sum < 260) dark++;
-            total++;
-        }
-
-    float threshold = 0.045f;      // between the 0.010 and 0.093 measured above
-    if (const char* v = std::getenv("PSZ_MODAL_MIN_TEXT"))
+    u32 c = 0xFFFFFFFFu;
+    for (int i = 0; i < n; i++)
     {
-        const float f = (float)atof(v);
-        if (f > 0.f && f < 1.f) threshold = f;
+        c ^= p[i];
+        for (int k = 0; k < 8; k++)
+            c = (c >> 1) ^ (0xEDB88320u & (~(c & 1) + 1));
     }
-    return ((float)dark / (float)total) >= threshold;
+    return ~c;
+}
+
+constexpr u32 OverlaySlot = 0x0211E640;
+
+static int ResidentOverlay(NDS* nds)
+{
+    u8 head[512];
+    for (int i = 0; i < 512; i++)
+        head[i] = nds->MainRAM[(OverlaySlot + i) & nds->MainRAMMask];
+
+    const u32 crc = Crc32(head, 512);
+    for (int i = 0; i < kNumOverlayFingerprints; i++)
+        if (kOverlayFingerprints[i].crc == crc)
+            return kOverlayFingerprints[i].id;
+
+    // No match is a TRANSIENT, not a mode: while an overlay is being DMA'd into
+    // the slot those bytes are a mix of two images. Callers hold the last known
+    // id rather than treating this as a state.
+    return -1;
+}
+
+// Does this overlay want its bottom screen presented?
+//
+// Measured, not assumed. ov16 is the cutscene player and ov17 the dialogue
+// player -- captured savestates put the opening cutscene in ov16 and the Kai
+// conversation in ov17, both with a NULL player object. In those the top screen
+// carries the content and the bottom holds only a skip prompt.
+static bool OverlayWantsBottomScreen(int ov)
+{
+    switch (ov)
+    {
+    case 16:   // cutscene player
+    case 17:   // dialogue player
+    case 0:    // title -- the logo is the top screen
+    case 6:    // ending / credits
+        return false;
+    default:
+        return true;   // file select, create, counter/shop, and anything unmapped
+    }
 }
 
 static void ApplyCheats(NDS* nds)
@@ -251,10 +261,16 @@ Frame Update(NDS* nds)
 
     if (!inGame || Read(nds, base + 0x280, 4) == 5)
     {
-        // Cutscene or dialogue: the bottom screen is nearly empty, so presenting
-        // it would replace the content with a skip prompt. Draw nothing at all
-        // and let the top screen through untouched.
-        if (!BottomScreenHasContent(nds)) return f;   // active stays false
+        // Hold the last known overlay across the DMA transient, so a mode never
+        // flickers while it is being swapped in.
+        static int lastOverlay = -1;
+        const int ov = ResidentOverlay(nds);
+        if (ov >= 0) lastOverlay = ov;
+
+        // Cutscene, dialogue, title, ending: the top screen is the content.
+        // Draw nothing and let it through untouched.
+        if (lastOverlay >= 0 && !OverlayWantsBottomScreen(lastOverlay))
+            return f;                                  // active stays false
 
         f.active = true;
         f.modal = true;
