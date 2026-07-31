@@ -108,7 +108,7 @@ decided by two reads. No overlay images, no heuristics.</p>
         through untouched. Emptiness is measured, not inferred: quantise the
         bottom screen to RGB444, and if all but under 12%
         (<code>PSZ_MODAL_MIN_CONTENT</code>) of sampled pixels are the single
-        commonest colour, there is nothing there worth showing.</td>
+        commonest colour... <em>superseded — see below.</em></td>
   </tr>
 </table>
 </div>
@@ -246,7 +246,26 @@ The rule cannot tell them apart, so it gets the second class wrong every time.
 </table>
 </div>
 
-<h3>Why the check is emptiness, not "is the HUD drawn"</h3>
+<h3>The measure is dark text, and the first attempt measured the wrong thing</h3>
+<p>The first version measured <strong>colour variety</strong> — how much of the
+bottom screen is not its commonest colour — assuming a cutscene's bottom screen
+is close to a flat fill. Measured on a real opening cutscene, it is not:</p>
+<div class="scroll">
+<table>
+  <tr><th>State</th><th class="mono">colour variety</th><th class="mono">dark text</th></tr>
+  <tr><td>opening cutscene</td><td class="mono">0.82</td><td class="mono">0.010</td></tr>
+  <tr><td>file select</td><td class="mono">0.69</td><td class="mono">0.093</td></tr>
+  <tr><td>character create</td><td class="mono">0.64</td><td class="mono">0.168</td></tr>
+</table>
+</div>
+<p>The cutscene has the <em>highest</em> colour variety of the three — it is a
+large pastel panel with faint patterning — so the first check called it dense and
+presented it, which is the bug it was written to fix. What separates them is
+<strong>dark text</strong>: real UI is near-black glyphs on light panels, and the
+cutscene filler is low contrast throughout. Threshold 0.045, tunable with
+<code>PSZ_MODAL_MIN_TEXT</code>.</p>
+
+<h3>Why the check is not "is the HUD drawn"</h3>
 <p>The obvious test is whether the field HUD is present in the rects we are about
 to copy. It is the wrong test: <strong>opening the Start menu removes that
 HUD</strong>, so a menu would read as "not a UI" and be passed through — trading

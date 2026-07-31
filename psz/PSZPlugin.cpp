@@ -136,53 +136,55 @@ static void ApplyCheat(NDS* nds, const Cheat& c)
 // Is the bottom screen worth presenting?
 //
 // The modal rule -- null player object, or control mode 5 -- says "the bottom
-// screen is the interaction". It is right for menus, shops and the counter, and
-// WRONG for cutscenes and dialogue, where the top screen carries the content and
-// the bottom holds only a skip prompt. Presenting it there hides exactly what the
-// player is looking at.
+// screen is the interaction". Right for menus, shops and the counter; wrong for
+// cutscenes and dialogue, where the top screen carries the content and the
+// bottom holds a skip prompt over decorative filler.
 //
-// Rather than trying to identify those states by mode, ask the question the
-// decision actually rests on: does the bottom screen have anything on it? A menu
-// is dense. A cutscene's bottom screen is close to a flat fill.
+// The measure is DARK-TEXT DENSITY, and the first attempt got this wrong in an
+// instructive way. It measured colour variety -- how much of the screen is not
+// its commonest colour -- on the assumption that a cutscene's bottom screen is
+// close to a flat fill. It is not. Measured on a real opening cutscene:
 //
-// Note this deliberately does NOT test for the field HUD. Opening the Start menu
+//     cutscene     colour-variety 0.82   dark-text 0.010
+//     file select  colour-variety 0.69   dark-text 0.093
+//     char create  colour-variety 0.64   dark-text 0.168
+//
+// The cutscene has the HIGHEST colour variety of the three, because it is a
+// large pastel panel with faint patterning -- so variety called it dense and
+// presented it, which is the bug it was meant to fix. What actually separates
+// them is dark text: real UI is near-black glyphs on light panels, and the
+// cutscene's filler is low contrast throughout.
+//
+// This also deliberately does NOT test for the field HUD. Opening the Start menu
 // removes that HUD, so a HUD test would misread a menu as "not a UI" -- kion
-// caught that. Emptiness is the property that separates the cases; HUD presence
-// is not.
+// caught that before it was written.
 static bool BottomScreenHasContent(NDS* nds)
 {
-    // GetFramebuffers returns false when the 3D renderer is accelerated, in
-    // which case the frame lives in a GL texture and there is nothing to sample
-    // on the CPU. Assume there is content rather than guessing -- that keeps the
-    // previous behaviour instead of blanking a screen we cannot inspect.
+    // GetFramebuffers returns false with an accelerated 3D renderer, where the
+    // frame lives in a GL texture and there is nothing to sample on the CPU.
+    // Assume content rather than guessing -- that keeps the previous behaviour
+    // instead of blanking a screen we cannot inspect.
     void* topbuf = nullptr; void* bottombuf = nullptr;
     if (!nds->GPU.GetFramebuffers(&topbuf, &bottombuf) || !bottombuf) return true;
     const u32* bottom = (const u32*)bottombuf;
 
-    // Quantise to RGB444 and find the commonest colour; whatever is not that is
-    // content. A flat fill plus a small prompt lands near zero.
-    static u16 hist[4096];
-    for (int i = 0; i < 4096; i++) hist[i] = 0;
-
-    int total = 0;
-    for (int y = 0; y < 192; y += 3)
-        for (int x = 0; x < 256; x += 3)
+    int dark = 0, total = 0;
+    for (int y = 0; y < 192; y += 2)
+        for (int x = 0; x < 256; x += 2)
         {
             const u32 c = bottom[y * 256 + x];
-            const int q = (((c >> 20) & 0xF) << 8) | (((c >> 12) & 0xF) << 4) | ((c >> 4) & 0xF);
-            hist[q]++; total++;
+            const int sum = ((c >> 16) & 0xFF) + ((c >> 8) & 0xFF) + (c & 0xFF);
+            if (sum < 260) dark++;
+            total++;
         }
-    int top = 0;
-    for (int i = 0; i < 4096; i++) if (hist[i] > top) top = hist[i];
 
-    const float content = 1.0f - (float)top / (float)total;
-    float threshold = 0.12f;
-    if (const char* v = std::getenv("PSZ_MODAL_MIN_CONTENT"))
+    float threshold = 0.045f;      // between the 0.010 and 0.093 measured above
+    if (const char* v = std::getenv("PSZ_MODAL_MIN_TEXT"))
     {
         const float f = (float)atof(v);
         if (f > 0.f && f < 1.f) threshold = f;
     }
-    return content >= threshold;
+    return ((float)dark / (float)total) >= threshold;
 }
 
 static void ApplyCheats(NDS* nds)
