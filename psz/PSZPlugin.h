@@ -121,6 +121,17 @@ bool PatchEternalMultiplayer(u8* rom, u32 romlen);
 // is what makes a handheld build possible today.
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f);
 
+// Render everything that comes from OUR OWN art -- the title logo, the drawn
+// player panel -- into a transparent 256x192 RGBA layer. Straight alpha.
+//
+// This exists so the GL frontend does not reimplement the drawing in shaders.
+// None of it needs game pixels, so a GL path can render this once on the CPU
+// and upload it, and both renderers then produce the same image by
+// construction rather than by two implementations agreeing.
+//
+// Returns false when there is nothing to draw, so the caller can skip upload.
+bool RenderArtLayer(u32* out256x192, const Frame& f);
+
 // Where an element lands on the top screen, as a fraction of it. Normalised so
 // that the DS-resolution compositor, the Qt window-pixel overlay and the GL
 // texture path can all scale ONE layout definition into their own space --

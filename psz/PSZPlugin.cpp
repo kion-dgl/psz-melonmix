@@ -543,16 +543,24 @@ static void BlitArt(u32* dst, const PSZArtImage& img,
             const int tx = dx + x;
             if (tx < 0 || tx >= 256) continue;
             const u32 s = src[sy * img.w + (x * img.w / dw)];
-            const u32 a = s >> 24;
-            if (!a) continue;
-            if (a == 255) { dst[ty * 256 + tx] = s; continue; }
+            const u32 sa = s >> 24;
+            if (!sa) continue;
+            if (sa == 255) { dst[ty * 256 + tx] = s; continue; }
 
+            // Full source-over, including destination alpha. The framebuffer is
+            // opaque so this reduces to the usual blend there, but the art
+            // layer starts TRANSPARENT -- blending against an implicit opaque
+            // black would fringe every soft edge with dark pixels.
             const u32 d = dst[ty * 256 + tx];
-            u32 out = 0xFF000000u;
+            const u32 da = d >> 24;
+            const u32 ia = da * (255 - sa) / 255;
+            const u32 oa = sa + ia;
+            if (!oa) continue;
+            u32 out = (oa & 0xFF) << 24;
             for (int c = 0; c < 3; c++)
             {
                 const u32 sc = (s >> (8 * c)) & 0xFF, dc = (d >> (8 * c)) & 0xFF;
-                out |= (((sc * a + dc * (255 - a)) / 255) & 0xFF) << (8 * c);
+                out |= (((sc * sa + dc * ia) / oa) & 0xFF) << (8 * c);
             }
             dst[ty * 256 + tx] = out;
         }
@@ -588,6 +596,16 @@ static int DrawNumber(u32* dst, int value, int rx, int y, u32 rgb)
         x += kGlyphW + 1;
     }
     return n * (kGlyphW + 1);
+}
+
+// The title's logo is DRAWN, not clipped. Lifting a rectangle off the top
+// screen carried its background with it and the seam was distracting on the
+// device -- the logo is not a rectangle, so no rect was ever going to work.
+// psz-godot's logo.png, with alpha.
+static void DrawTitleLogo(u32* dst)
+{
+    const int lw = kArt_logo.w, lh = kArt_logo.h;
+    BlitArt(dst, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
 }
 
 // The player panel, drawn from values instead of clipped from the bottom
@@ -643,6 +661,20 @@ static void DrawPlayerPanel(u32* dst, const Frame& f)
     DrawNumber(dst, f.level, dx + (int)(0.52f * dw), dy + (int)(0.16f * dh), 0x000000);
 }
 
+bool RenderArtLayer(u32* out, const Frame& f)
+{
+    if (!out || !f.active) return false;
+
+    const bool wantLogo  = f.modal && f.keepTop;
+    const bool wantPanel = !f.modal && f.panel;
+    if (!wantLogo && !wantPanel) return false;
+
+    std::memset(out, 0, 256 * 192 * sizeof(u32));
+    if (wantLogo)  DrawTitleLogo(out);
+    if (wantPanel) DrawPlayerPanel(out, f);
+    return true;
+}
+
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
 {
     if (!topFB || !bottomFB || !f.active) return;
@@ -653,15 +685,7 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
     {
         for (int i = 0; i < 256 * 192; i++) topFB[i] = bottomFB[i];
 
-        // The title's logo is DRAWN, not clipped. Lifting a rectangle off the
-        // top screen carried its background with it and kion found the seam
-        // distracting on the device -- the logo is not a rectangle, so no rect
-        // was ever going to work. This is psz-godot's logo.png, with alpha.
-        if (f.keepTop)
-        {
-            const int lw = kArt_logo.w, lh = kArt_logo.h;
-            BlitArt(topFB, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
-        }
+        if (f.keepTop) DrawTitleLogo(topFB);
         return;
     }
 

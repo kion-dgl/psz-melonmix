@@ -19,9 +19,14 @@ static const char* kFrag =
     "uniform sampler2D uTex;\n"
     "in vec2 vUV;\n"
     "out vec4 oCol;\n"
-    "void main() { oCol = vec4(texture(uTex, vUV).rgb, 1.0); }\n";
+    "uniform float uUseAlpha;\n"
+    "void main() {\n"
+    "  vec4 t = texture(uTex, vUV);\n"
+    "  oCol = vec4(t.rgb, mix(1.0, t.a, uUseAlpha));\n"
+    "}\n";
 
-static GLuint gProg = 0, gVAO = 0, gVBO = 0, gFBO = 0, gScratch = 0;
+static GLuint gProg = 0, gVAO = 0, gVBO = 0, gFBO = 0, gScratch = 0, gArtTex = 0;
+static PSZMix::u32 gArtLayer[256 * 192];
 static int gScratchW = 0, gScratchH = 0;
 static bool gFailed = false;
 
@@ -82,6 +87,18 @@ static bool Init()
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     glBindTexture(GL_TEXTURE_2D, 0);
+
+    // The art layer is rendered on the CPU by PSZMix::RenderArtLayer and
+    // uploaded, rather than reimplemented in shaders -- see PSZPlugin.h. Fixed
+    // at DS resolution; the quad scales it.
+    glGenTextures(1, &gArtTex);
+    glBindTexture(GL_TEXTURE_2D, gArtTex);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, 256, 192, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D, 0);
     return true;
 }
 
@@ -128,12 +145,20 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
         for (int i = 0; i < f.count; i++)
         {
             const PSZMix::Element& e = f.elems[i];
+            // The panel is drawn from art in the layer below; its clip would
+            // otherwise show through underneath it. Composite() skips it the
+            // same way.
+            if (f.panel && e.corner == PSZMix::Corner_TopLeft) continue;
             PushQuad(verts, PSZMix::PlaceElement(e, hs),
                      e.sx / 256.0f, e.sy / 192.0f,
                      (e.sx + e.sw) / 256.0f, (e.sy + e.sh) / 192.0f);
         }
     }
-    if (verts.empty()) return;
+    // A frame can be art-only -- the title draws a logo over a modal that is
+    // itself a clip, but the panel replaces its clip entirely. Do not bail
+    // before the art layer gets a chance to draw.
+    const bool haveArt = PSZMix::RenderArtLayer(gArtLayer, f);
+    if (verts.empty() && !haveArt) return;
 
     GLint prevFBO = 0, prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -181,7 +206,30 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
     glEnableVertexAttribArray(1);
     glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
 
+    glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 0.0f);
     glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(verts.size() / 4));
+
+    // Our own art -- title logo, drawn player panel -- over the top. This is
+    // why the OpenGL renderer showed only the four clips: the drawing lived in
+    // the CPU compositor, which the accelerated path never reaches.
+    if (haveArt)
+    {
+        glBindTexture(GL_TEXTURE_2D, gArtTex);
+        glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 192, GL_RGBA,
+                        GL_UNSIGNED_BYTE, gArtLayer);
+
+        std::vector<float> full;
+        PSZMix::Place whole = { 0.0f, 0.0f, 1.0f, 1.0f };
+        PushQuad(full, whole, 0.0f, 0.0f, 1.0f, 1.0f);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(full.size() * sizeof(float)),
+                     full.data(), GL_STREAM_DRAW);
+
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
+        glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 1.0f);
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(full.size() / 4));
+        glDisable(GL_BLEND);
+    }
 
     glBindVertexArray(0);
     glBindBuffer(GL_ARRAY_BUFFER, 0);
@@ -198,6 +246,7 @@ void Cleanup()
     if (gVBO)     { glDeleteBuffers(1, &gVBO); gVBO = 0; }
     if (gFBO)     { glDeleteFramebuffers(1, &gFBO); gFBO = 0; }
     if (gScratch) { glDeleteTextures(1, &gScratch); gScratch = 0; }
+    if (gArtTex)  { glDeleteTextures(1, &gArtTex); gArtTex = 0; }
     gScratchW = gScratchH = 0;
     gFailed = false;
 }
