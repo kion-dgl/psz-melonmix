@@ -1,0 +1,27 @@
+diff --git a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
+index 58f67125..1abf7477 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
+@@ -68,6 +68,22 @@ class DefaultLayoutProvider(
+                 mainLayout to buildSingleScreenLayout(secondaryDisplay.width, secondaryDisplay.height, LayoutComponent.TOP_SCREEN)
+             }
+         } else {
++            // psz-melonmix: this build shows ONE screen. The overlay composites
++            // everything the player needs onto the top screen, so a fresh install
++            // should already be top-screen-only and filling the display -- kion
++            // had to hand-build a layout and could not remove the bottom window,
++            // which is configuration to reach the only state this build supports.
++            //
++            // Physical-control devices (the Retroid this targets) lose nothing.
++            // On a touch-only device this also removes the on-screen buttons,
++            // which is the known cost of forcing it.
++            if (!java.lang.Boolean.getBoolean("psz.dualScreen")) {
++                return UILayout(
++                    buildSingleScreenLayout(width, height, LayoutComponent.TOP_SCREEN),
++                    ScreenLayout(),
++                )
++            }
++
+             val mainScreenLayout = when (orientation) {
+                 Orientation.PORTRAIT -> {
+                     if (folds.any { it.orientation == Orientation.LANDSCAPE }) {
