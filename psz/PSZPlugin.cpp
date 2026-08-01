@@ -82,15 +82,16 @@ static const RectDef Rects[] = {
 static constexpr int NumRects = sizeof(Rects) / sizeof(Rects[0]);
 
 // Frames to keep presenting the outgoing mode after the game switches, so a
-// cross-fade covers the change. Six is what looked right on the Retroid at the
-// title-to-file-select fade; PSZ_TRANSITION_HOLD retunes it.
+// cross-fade covers the change. Six improved the title-to-file-select fade on
+// the Retroid but still cut in slightly early, so ten; PSZ_TRANSITION_HOLD
+// retunes it without a rebuild.
 static int TransitionHold()
 {
     static const int n = [] {
         const char* v = std::getenv("PSZ_TRANSITION_HOLD");
-        if (!v) return 6;
+        if (!v) return 10;
         const int k = std::atoi(v);
-        return (k >= 0 && k <= 60) ? k : 6;
+        return (k >= 0 && k <= 60) ? k : 10;
     }();
     return n;
 }
@@ -428,10 +429,13 @@ Frame Update(NDS* nds)
         // boot and break cutscenes, or the reverse.
         //
         // Sequence settles it without naming anything: everything before the
-        // FIRST title is boot. The health-and-safety and ESRB notices are on
-        // the top screen and the SEGA logo on the bottom, so boot wants the
-        // bottom screen -- the opposite of what a cutscene wants from the very
-        // same overlay id.
+        // FIRST title is boot.
+        //
+        // ESRB is on the BOTTOM screen and the SEGA logo on the TOP -- measured
+        // by consequence, not assumption. This first shipped the other way
+        // round, presenting the bottom screen during boot, and kion reported
+        // still seeing ESRB. So boot wants the TOP screen, the same as a
+        // cutscene does; it is only the modal default it has to escape.
         static bool seenTitle = false;
         if (lastOverlay == 0) seenTitle = true;
         const bool booting = !seenTitle;
@@ -455,8 +459,8 @@ Frame Update(NDS* nds)
 
         // Cutscene, dialogue, character create, ending: the top screen is the
         // content. Draw nothing and let it through untouched.
-        if (!booting && effectiveOverlay >= 0 &&
-            !OverlayWantsBottomScreen(effectiveOverlay))
+        if (booting ||
+            (effectiveOverlay >= 0 && !OverlayWantsBottomScreen(effectiveOverlay)))
             return f;                                  // active stays false
 
         // The title needs both screens: PRESS START is on the bottom, the logo
