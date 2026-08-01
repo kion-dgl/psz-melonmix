@@ -223,7 +223,54 @@ room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
   the description and both portraits still legible.</figcaption>
 </figure>
 
-<h2 id="bugs">Reported bugs <span class="tag ok">all fixed</span></h2>
+<h2 id="target">Per-screen target behaviour <span class="tag gap">revised on device</span></h2>
+<p>From testing on a Retroid Pocket. This supersedes the earlier
+"cutscene/dialogue/title all show the top screen" rule — the title in particular
+reverses.</p>
+<div class="scroll">
+<table>
+  <tr><th>Screen</th><th>Present</th><th>Notes</th><th>State</th></tr>
+  <tr><td>Gameplay</td><td>top</td><td>corner HUD elements</td><td><span class="tag ok">correct</span></td></tr>
+  <tr><td>Cutscene, dialogue</td><td>top</td><td>—</td><td><span class="tag ok">correct</span></td></tr>
+  <tr><td>Start menu</td><td>bottom, full</td><td><strong>Works well as-is.</strong> The PSO-style
+      recomposition is <em>dropped</em>: a full bottom screen turned out better than
+      spreading panels around the scene.</td><td><span class="tag ok">correct</span></td></tr>
+  <tr><td>Title</td><td><strong>bottom</strong></td><td>with the logo sprite from the
+      <em>top</em> screen drawn onto it — a composite, not a swap</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Select character</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Select mode</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Create character</td><td><strong>top</strong></td><td>needs <em>custom sliders</em> drawn by us,
+      not a blit of the game's panel</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Name entry</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
+</table>
+</div>
+
+<h2 id="android-gl">Android: no overlay under OpenGL <span class="tag gap">bug</span></h2>
+<p><code>MelonInstance.cpp</code> guards the overlay with
+<code>if (!isRendererAccelerated)</code>, so with the OpenGL renderer it never
+runs and the accelerated branch is a literal <em>"Do nothing"</em>. One cause,
+two symptoms: no HUD elements at all on GPU, and the pre-game screens showing
+whatever melonDS-android's own layout does rather than our policy.</p>
+<p>It cannot be fixed by moving the call — in the accelerated path the frame
+lives in a GL texture and <code>Composite()</code> needs CPU framebuffers.
+Android needs a real drawing path, the same shape as the Qt one.</p>
+
+<h2 id="hud-art">HUD elements: rects are the wrong primitive <span class="tag gap">direction change</span></h2>
+<p>Two problems with copying rectangles out of the bottom screen, both reported
+from the device:</p>
+<ul>
+  <li><strong>They are too large.</strong> Android composites at DS resolution,
+      where a 70px panel is 27% of the screen at any output size.</li>
+  <li><strong>The game's panels are not rectangles.</strong> They have rounded and
+      notched frames, so a rectangular clip drags in background around the edges.
+      No choice of rect fixes that.</li>
+</ul>
+<p>The direction is our own artwork with alpha — PNG elements drawn over the
+scene, fed by values already read from RAM — plus a size control. Both need a
+drawing path that can scale and blend, which is the same missing piece as the
+OpenGL bug above.</p>
+
+<h2 id="bugs">Earlier reported bugs <span class="tag ok">all fixed</span></h2>
 
 <div class="card rule">
 All three come from one root cause, so they should be fixed together rather than
