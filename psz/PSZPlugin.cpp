@@ -339,6 +339,37 @@ static void ReadRooms(NDS* nds, Frame& f)
     }
 }
 
+// THE TWO FORKS EXPOSE DIFFERENT FRAMEBUFFER APIS.
+//
+// Upstream melonDS has GPU::GetFramebuffers(); melonDS-android-lib has the raw
+// GPU::Framebuffer[front][screen] arrays and no GetFramebuffers at all. This
+// file is shared by both, so it cannot name either directly -- doing so built
+// on desktop and failed the Android core with "no member named
+// GetFramebuffers".
+//
+// Overload resolution picks whichever exists: the int overload is preferred and
+// only viable when GetFramebuffers() is declared, otherwise the long one wins.
+//
+// Both return null under an accelerated renderer, where the frame lives only as
+// a GL texture and there is no CPU-side framebuffer to read.
+template <typename G>
+static auto BottomFramebuffer(G& gpu, int)
+    -> decltype(gpu.GetFramebuffers(nullptr, nullptr), (const u32*)nullptr)
+{
+    void* top = nullptr;
+    void* bot = nullptr;
+    if (!gpu.GetFramebuffers(&top, &bot) || !bot) return nullptr;
+    return (const u32*)bot;
+}
+
+template <typename G>
+static auto BottomFramebuffer(G& gpu, long) -> const u32*
+{
+    const int front = gpu.FrontBuffer;
+    if (!gpu.Framebuffer[front][1]) return nullptr;
+    return (const u32*)gpu.Framebuffer[front][1].get();
+}
+
 // Is there text in this box? Counts dark pixels inside an inset margin, since
 // the game draws contextual text dark on a pale panel. Inset so the panel's own
 // border does not count as content.
@@ -510,10 +541,7 @@ Frame Update(NDS* nds)
     // the sync stall the -O2 fix just bought back, the GL frontend supplies its
     // own answer through SetBoxHasTextHint(). Absent a hint, the box shows --
     // failing toward visible, since a missing prompt is worse than a spare one.
-    void* topPtr = nullptr;
-    void* botPtr = nullptr;
-    const bool haveCpuFB = nds->GPU.GetFramebuffers(&topPtr, &botPtr) && botPtr;
-    const u32* bottomFB = haveCpuFB ? (const u32*)botPtr : nullptr;
+    const u32* bottomFB = BottomFramebuffer(nds->GPU, 0);
 
     for (int i = 0; i < NumRects; i++)
     {
