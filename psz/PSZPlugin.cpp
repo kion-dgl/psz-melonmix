@@ -495,13 +495,13 @@ Place PlaceElement(const Element& e, float hudScale)
 // not to be walked every frame.
 static const u32* DecodeArt(const PSZArtImage& img)
 {
-    static const PSZArtImage* cachedFor[4] = {};
-    static u32* cached[4] = {};
-    for (int i = 0; i < 4; i++)
+    static const PSZArtImage* cachedFor[8] = {};
+    static u32* cached[8] = {};
+    for (int i = 0; i < 8; i++)
         if (cachedFor[i] == &img) return cached[i];
 
     int slot = -1;
-    for (int i = 0; i < 4 && slot < 0; i++) if (!cachedFor[i]) slot = i;
+    for (int i = 0; i < 8 && slot < 0; i++) if (!cachedFor[i]) slot = i;
     if (slot < 0) return nullptr;
 
     u32* buf = new u32[img.w * img.h];
@@ -510,10 +510,13 @@ static const u32* DecodeArt(const PSZArtImage& img)
     for (unsigned int i = 0; i + 4 < img.rleLen; i += 5)
     {
         const unsigned char n = img.rle[i];
-        // Framebuffer bytes are R,G,B,A -- the same order the PNG decodes to,
-        // so this is a straight pack with no channel swap.
-        const u32 px = (u32)img.rle[i + 1] | ((u32)img.rle[i + 2] << 8) |
-                       ((u32)img.rle[i + 3] << 16) | ((u32)img.rle[i + 4] << 24);
+        // The framebuffer is 0xAARRGGBB, NOT the R,G,B,A byte order the PNG
+        // decodes to. Packing it straight through swapped red and blue, and the
+        // panel's blue came out orange on the Retroid. The solid fills below
+        // were already written as 0xRRGGBB and were correct, which is why only
+        // the artwork was wrong.
+        const u32 px = ((u32)img.rle[i + 1] << 16) | ((u32)img.rle[i + 2] << 8) |
+                       (u32)img.rle[i + 3] | ((u32)img.rle[i + 4] << 24);
         for (int k = 0; k < n && w < end; k++) *w++ = px;
     }
     cachedFor[slot] = &img;
@@ -631,12 +634,13 @@ static void DrawPlayerPanel(u32* dst, const Frame& f)
         // interior is 4px and a glyph is 5px, so centring them in the bar puts
         // them half below it. Current left of the art's own slash, max right.
         const int ny = dy + (int)((b.y - 10.0f / 120.0f) * dh);
-        DrawNumber(dst, (int)b.cur, dx + (int)(0.60f * dw), ny, 0xFFFFFF);
-        DrawNumber(dst, (int)b.max, dx + (int)(0.93f * dw), ny, 0xFFFFFF);
+        // Black. White read as broken against the panel's pale art.
+        DrawNumber(dst, (int)b.cur, dx + (int)(0.60f * dw), ny, 0x000000);
+        DrawNumber(dst, (int)b.max, dx + (int)(0.93f * dw), ny, 0x000000);
     }
 
     // Level sits to the RIGHT of the art's own "Lv" label.
-    DrawNumber(dst, f.level, dx + (int)(0.52f * dw), dy + (int)(0.16f * dh), 0xFFFFFF);
+    DrawNumber(dst, f.level, dx + (int)(0.52f * dw), dy + (int)(0.16f * dh), 0x000000);
 }
 
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
@@ -647,29 +651,17 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
     // screens are the same size, so presenting it is a straight copy.
     if (f.modal)
     {
-        // Save the slice first: the copy below is about to overwrite it, and it
-        // is the top screen's own pixels that have to survive.
-        static u32 slice[256 * 192];
-        const bool keep = f.keepTop && f.ktw > 0 && f.kth > 0;
-        if (keep)
-            for (int y = 0; y < f.kth; y++)
-                for (int x = 0; x < f.ktw; x++)
-                {
-                    const int sx = f.ktx + x, sy = f.kty + y;
-                    if (sx >= 0 && sx < 256 && sy >= 0 && sy < 192)
-                        slice[y * 256 + x] = topFB[sy * 256 + sx];
-                }
-
         for (int i = 0; i < 256 * 192; i++) topFB[i] = bottomFB[i];
 
-        if (keep)
-            for (int y = 0; y < f.kth; y++)
-                for (int x = 0; x < f.ktw; x++)
-                {
-                    const int dx = f.ktx + x, dy = f.kty + y;
-                    if (dx >= 0 && dx < 256 && dy >= 0 && dy < 192)
-                        topFB[dy * 256 + dx] = slice[y * 256 + x];
-                }
+        // The title's logo is DRAWN, not clipped. Lifting a rectangle off the
+        // top screen carried its background with it and kion found the seam
+        // distracting on the device -- the logo is not a rectangle, so no rect
+        // was ever going to work. This is psz-godot's logo.png, with alpha.
+        if (f.keepTop)
+        {
+            const int lw = kArt_logo.w, lh = kArt_logo.h;
+            BlitArt(topFB, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
+        }
         return;
     }
 

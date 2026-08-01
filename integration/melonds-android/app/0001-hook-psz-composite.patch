@@ -1,8 +1,28 @@
 diff --git a/app/CMakeLists.txt b/app/CMakeLists.txt
-index 2ec2ba88..fdfb0a3a 100644
+index 2ec2ba88..c94e76cc 100644
 --- a/app/CMakeLists.txt
 +++ b/app/CMakeLists.txt
-@@ -42,6 +42,7 @@ add_library(
+@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 3.4.1)
+ 
+ project(melonDS-android-frontend)
+ 
++# psz-melonmix: optimise native code even in the debug variant.
++#
++# The APKs we hand kion to test are assembleGitHubProdDebug, and AGP compiles
++# native code at -O0 for a debuggable variant. A DS emulator at -O0 is roughly
++# half speed -- which is exactly what he reported: PSZ running at half rate on
++# the Retroid while stock melonDS ran it fine. The overlay was not the cause.
++#
++# COMPILE_OPTIONS land after CMAKE_CXX_FLAGS_DEBUG, so this -O2 wins over the
++# -O0 AGP puts there, without giving up the debug signing that lets the build
++# install over itself.
++add_compile_options(-O2)
++
++
+ add_compile_definitions(MELONDS_GL_HEADER=<GLES3/gl32.h>)
+ add_compile_definitions(EGL_EGLEXT_PROTOTYPES)
+ 
+@@ -42,6 +55,7 @@ add_library(
          ${ANDROID-CPP}/MelonDSAudio.cpp
          ${ANDROID-CPP}/MelonDSNandJNI.cpp
          ${ANDROID-CPP}/MelonInstance.cpp

@@ -34,7 +34,8 @@ OUT = ROOT / "psz" / "PSZArt.h"
 # grid is not drawn from art yet, and baking a 1024x1004 image to feed a
 # feature that does not exist is how a header becomes unreviewable.
 IMAGES = [
-    ("panel", "hp-pp.png"),
+    ("logo", "logo.png", 208),      # third field: resize width, for art drawn
+    ("panel", "hp-pp.png"),         # much larger than its destination
     ("map", "map.png"),
     ("palette", "palette_bg.png"),
 ]
@@ -63,8 +64,10 @@ def rle(pixels):
     return out
 
 
-def emit_image(f, name, path):
+def emit_image(f, name, path, fitw=None):
     img = Image.open(path).convert("RGBA")
+    if fitw and img.width > fitw:
+        img = img.resize((fitw, max(1, img.height * fitw // img.width)), Image.LANCZOS)
     runs = rle(list(img.getdata()))
     raw = img.width * img.height * 4
     packed = len(runs) * 5
@@ -108,7 +111,7 @@ def emit_glyphs(f):
 
 
 def main():
-    missing = [n for _, n in IMAGES if not (ART / n).is_file()]
+    missing = [e[1] for e in IMAGES if not (ART / e[1]).is_file()]
     if missing:
         sys.exit("!! missing art: %s\n   run scripts/fetch-hud-art.sh first"
                  % ", ".join(missing))
@@ -137,8 +140,10 @@ struct PSZArtImage
 
 """)
         total = 0
-        for name, fn in IMAGES:
-            total += emit_image(f, name, ART / fn)
+        for entry in IMAGES:
+            name, fn = entry[0], entry[1]
+            fitw = entry[2] if len(entry) > 2 else None
+            total += emit_image(f, name, ART / fn, fitw)
         total += emit_glyphs(f)
         f.write("#endif\n")
 
