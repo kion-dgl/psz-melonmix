@@ -227,6 +227,13 @@ room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
 <p>From testing on a Retroid Pocket. This supersedes the earlier
 "cutscene/dialogue/title all show the top screen" rule — the title in particular
 reverses.</p>
+<p><strong>This table is most of the product.</strong> Only a handful of screens
+genuinely use both displays; for the rest, showing the right one at the right
+time <em>is</em> the single-screen experience, and it needs no memory layout at
+all — just the overlay id. The HUD drawing below is the smaller remainder.</p>
+<p>Ids come from psz-re <code>docs/game-state.md</code>, which names eight of the
+nineteen slot overlays. Two screens in this table have no id of their own, and
+that is the open problem rather than an omission.</p>
 <div class="scroll">
 <table>
   <tr><th>Screen</th><th>Present</th><th>Notes</th><th>State</th></tr>
@@ -235,13 +242,23 @@ reverses.</p>
   <tr><td>Start menu</td><td>bottom, full</td><td><strong>Works well as-is.</strong> The PSO-style
       recomposition is <em>dropped</em>: a full bottom screen turned out better than
       spreading panels around the scene.</td><td><span class="tag ok">correct</span></td></tr>
-  <tr><td>Title</td><td><strong>bottom</strong></td><td>with the logo sprite from the
-      <em>top</em> screen drawn onto it — a composite, not a swap</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Select character</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Select mode</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Create character</td><td><strong>top</strong></td><td>needs <em>custom sliders</em> drawn by us,
-      not a blit of the game's panel</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Name entry</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Title <code>ov00</code></td><td><strong>bottom</strong></td><td>with the logo kept from the
+      <em>top</em> screen — a composite, not a swap. The slice is clipped from the
+      running game (<code>PSZ_TITLE_LOGORECT</code>); psz-godot's
+      <code>images/logo.png</code> is the eventual upgrade, once anything here can
+      decode a PNG.</td><td><span class="tag ok">implemented</span></td></tr>
+  <tr><td>Select character <code>ov14</code></td><td>bottom</td><td>psz-re calls this
+      "file select"</td><td><span class="tag ok">implemented</span></td></tr>
+  <tr><td>Select mode</td><td>bottom</td><td><strong>No overlay id.</strong> Not a mode of its own —
+      presumed a sub-state of file select, so it inherits that policy and needs no
+      work unless it turns out to differ.</td><td><span class="tag gap">unidentified</span></td></tr>
+  <tr><td>Create character <code>ov11</code></td><td><strong>top</strong></td><td>top is the character
+      preview, bottom the sliders. Presenting the preview is done; <em>custom sliders
+      down the left</em> are not.</td><td><span class="tag ok">screen only</span></td></tr>
+  <tr><td>Name entry</td><td>bottom</td><td><strong>No overlay id.</strong> Presumed a sub-state of
+      character create — which is the one case where inheriting is WRONG, since
+      create shows the top screen and name entry wants the bottom. Needs a
+      sub-state signal.</td><td><span class="tag gap">unidentified</span></td></tr>
 </table>
 </div>
 

@@ -35,15 +35,21 @@ SLOT = 0x0211E640 - 0x02000000
 PLAYER = 0x02108D04 - 0x02000000
 HDRCOPY = 0x023FFE0C - 0x02000000
 
-# What each overlay means, as far as it has been confirmed. Anything absent is
-# genuinely unidentified rather than assumed -- an id printed with no label is
-# the interesting case, not a formatting gap.
+# From psz-re docs/game-state.md, which names eight of the nineteen. Eleven are
+# genuinely unmapped -- an id printed as UNIDENTIFIED is the interesting case,
+# not a formatting gap.
+#
+# ov16/ov17 carry BOTH accounts because they disagree: psz-re names them from
+# the boot sequence, this project's captures from in-game content. Not resolved.
 KNOWN = {
-    0: "title",
+    0: "title -- PRESS START",
     4: "main game (field / town)",
     6: "ending / credits",
-    16: "cutscene player",
-    17: "dialogue player",
+    11: "character create",
+    12: "counter / shop UI",
+    14: "file select",
+    16: "intro logo / cutscene (?)",
+    17: "attract cutscene / dialogue (?)",
 }
 
 

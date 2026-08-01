@@ -27,6 +27,21 @@
 namespace PSZMix
 {
 
+// PLAYER STATS, for the panels we draw ourselves rather than clip.
+//
+// From psz-re data/hud_memory_map.json, re-verified here against 13 savestates:
+// levels 1..50 all plausible, EXP rises with level, and the one uncheated state
+// reads HP 82/82 PP 67/67 at level 1 while every cheated save reads 9999/999.
+//
+// Level is in the SAVE-WORK object, not the player object -- reading +0x92 off
+// the player pointer gives 538, which is what made an earlier pass here
+// conclude, wrongly, that the offsets did not exist.
+static constexpr u32 SaveWorkPtr = 0x0211A530;   // -> save-work; +0x92 u16 level
+static constexpr u32 CurHpAddr   = 0x021A21FE;
+static constexpr u32 CurPpAddr   = 0x021A2200;
+static constexpr u32 MaxHpAddr   = 0x021A210C;
+static constexpr u32 MaxPpAddr   = 0x021A210E;
+
 static constexpr u32 PlayerPtr = 0x02108D04;
 static constexpr u32 RoomRoot  = 0x02108C64;
 static constexpr u32 AspectVal = 0x020346E0;
@@ -211,25 +226,47 @@ static int ResidentOverlay(NDS* nds)
     return -1;
 }
 
-// Does this overlay want its bottom screen presented?
+// WHICH SCREEN IS THE ONE TO SHOW.
 //
-// Measured, not assumed. ov16 is the cutscene player and ov17 the dialogue
-// player -- captured savestates put the opening cutscene in ov16 and the Kai
-// conversation in ov17, both with a NULL player object. In those the top screen
-// carries the content and the bottom holds only a skip prompt.
+// Most of PSZ uses one screen for content and the other for decoration, so
+// simply presenting the right one is most of what this build has to do -- far
+// more of the experience than any HUD drawing. The ids come from psz-re
+// docs/game-state.md, which names eight of the nineteen slot overlays.
+//
+// ov16/ov17: psz-re names these "intro / boot logo" and "pre-title attract
+// cutscene". This project's own captures instead put the opening cutscene in
+// ov16 and the Kai conversation in ov17, both with a NULL player object. Those
+// two accounts DISAGREE and neither has been retested since. It does not change
+// the policy -- every reading of both wants the top screen -- so the conflict is
+// recorded rather than resolved by picking a favourite.
 static bool OverlayWantsBottomScreen(int ov)
 {
     switch (ov)
     {
-    case 16:   // cutscene player
-    case 17:   // dialogue player
-    case 0:    // title -- the logo is the top screen
+    case 16:   // cutscene / intro
+    case 17:   // dialogue / attract
     case 6:    // ending / credits
         return false;
+    case 11:   // character create -- the top screen is the character preview,
+               // the bottom is the sliders. The preview is the thing worth
+               // seeing; our own sliders replace the bottom screen later.
+        return false;
     default:
-        return true;   // file select, create, counter/shop, and anything unmapped
+        return true;   // title, file select, counter/shop, anything unmapped
     }
 }
+
+// Does this overlay keep a slice of the TOP screen over the presented bottom?
+//
+// The title is the one screen that genuinely needs both: the logo lives on the
+// top screen and PRESS START on the bottom. Presenting only the bottom loses the
+// logo, which is the whole identity of the screen.
+//
+// Clipped from the running game rather than shipped as an image: psz-godot has
+// a clean logo.png with alpha, but loading it needs an image decoder and an
+// asset path this build does not have yet. The clip works today and costs
+// nothing. PSZ_TITLE_LOGORECT retunes it without a rebuild.
+static bool OverlayKeepsTopSlice(int ov) { return ov == 0; }
 
 static void ApplyCheats(NDS* nds)
 {
@@ -309,10 +346,26 @@ Frame Update(NDS* nds)
         const int ov = ResidentOverlay(nds);
         if (ov >= 0) lastOverlay = ov;
 
-        // Cutscene, dialogue, title, ending: the top screen is the content.
-        // Draw nothing and let it through untouched.
+        // Cutscene, dialogue, character create, ending: the top screen is the
+        // content. Draw nothing and let it through untouched.
         if (lastOverlay >= 0 && !OverlayWantsBottomScreen(lastOverlay))
             return f;                                  // active stays false
+
+        // The title needs both screens: PRESS START is on the bottom, the logo
+        // on the top. Presenting the bottom alone throws the logo away.
+        if (lastOverlay >= 0 && OverlayKeepsTopSlice(lastOverlay))
+        {
+            // Estimated from a device capture of the title, not measured
+            // against the framebuffer -- retune with PSZ_TITLE_LOGORECT.
+            int x = 16, y = 68, w = 224, h = 56;
+            if (const char* o = std::getenv("PSZ_TITLE_LOGORECT"))
+                std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h);
+            if (w > 0 && h > 0 && x >= 0 && y >= 0 && x + w <= 256 && y + h <= 192)
+            {
+                f.keepTop = true;
+                f.ktx = x; f.kty = y; f.ktw = w; f.kth = h;
+            }
+        }
 
         // PSO-style: spread the main menu's own panels to the edges rather than
         // presenting the whole bottom screen. Only inside the main game, where
@@ -422,7 +475,29 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
     // screens are the same size, so presenting it is a straight copy.
     if (f.modal)
     {
+        // Save the slice first: the copy below is about to overwrite it, and it
+        // is the top screen's own pixels that have to survive.
+        static u32 slice[256 * 192];
+        const bool keep = f.keepTop && f.ktw > 0 && f.kth > 0;
+        if (keep)
+            for (int y = 0; y < f.kth; y++)
+                for (int x = 0; x < f.ktw; x++)
+                {
+                    const int sx = f.ktx + x, sy = f.kty + y;
+                    if (sx >= 0 && sx < 256 && sy >= 0 && sy < 192)
+                        slice[y * 256 + x] = topFB[sy * 256 + sx];
+                }
+
         for (int i = 0; i < 256 * 192; i++) topFB[i] = bottomFB[i];
+
+        if (keep)
+            for (int y = 0; y < f.kth; y++)
+                for (int x = 0; x < f.ktw; x++)
+                {
+                    const int dx = f.ktx + x, dy = f.kty + y;
+                    if (dx >= 0 && dx < 256 && dy >= 0 && dy < 192)
+                        topFB[dy * 256 + dx] = slice[y * 256 + x];
+                }
         return;
     }
 

@@ -68,6 +68,11 @@ struct Frame
     Element elems[MaxElements];
     int count = 0;
 
+    // The title keeps its logo: these pixels of the TOP screen are drawn back
+    // over the presented bottom screen, at the same place they already occupy.
+    bool keepTop = false;
+    int ktx = 0, kty = 0, ktw = 0, kth = 0;
+
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
     Room rooms[MaxRooms];
