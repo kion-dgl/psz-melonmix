@@ -1,8 +1,8 @@
 diff --git a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
-index 58f67125..1abf7477 100644
+index 58f67125..8e46b116 100644
 --- a/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
 +++ b/app/src/main/java/me/magnum/melonds/impl/layout/DefaultLayoutProvider.kt
-@@ -68,6 +68,22 @@ class DefaultLayoutProvider(
+@@ -68,6 +68,34 @@ class DefaultLayoutProvider(
                  mainLayout to buildSingleScreenLayout(secondaryDisplay.width, secondaryDisplay.height, LayoutComponent.TOP_SCREEN)
              }
          } else {
@@ -16,8 +16,20 @@ index 58f67125..1abf7477 100644
 +            // On a touch-only device this also removes the on-screen buttons,
 +            // which is the known cost of forcing it.
 +            if (!java.lang.Boolean.getBoolean("psz.dualScreen")) {
++                // FILL, not fit. centerScreenIn() preserves the DS 4:3 and
++                // pillarboxes a 16:9 handheld, which is not the fullscreen this
++                // build is for.
++                //
++                // Stretching is a deliberate trade. The widescreen cheat widens
++                // the 3D projection into the same 256x192 buffer, so gameplay is
++                // anamorphic and stretching it back is CORRECT. The 2D screens
++                // -- title, file select, menus -- are genuinely distorted by it.
++                // Tested on the Retroid and accepted: kion played it and it did
++                // not look bad. One aspect for every state beats a rule that
++                // changes under the player.
 +                return UILayout(
-+                    buildSingleScreenLayout(width, height, LayoutComponent.TOP_SCREEN),
++                    ScreenLayout(listOf(PositionedLayoutComponent(
++                        Rect(0, 0, width, height), LayoutComponent.TOP_SCREEN))),
 +                    ScreenLayout(),
 +                )
 +            }
