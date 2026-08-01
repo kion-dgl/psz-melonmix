@@ -383,6 +383,37 @@ static void Blit(u32* dst, const u32* src, int sx, int sy, int sw, int sh,
     }
 }
 
+float HudScale()
+{
+    static const float s = [] {
+        const char* v = getenv("PSZ_HUD_ELEMENT_SCALE");
+        if (!v) return 1.0f;
+        float f = (float)atof(v);
+        return (f > 0.05f && f < 8.0f) ? f : 1.0f;
+    }();
+    return s;
+}
+
+Place PlaceElement(const Element& e, float hudScale)
+{
+    const float mx = 2.0f / 256.0f, my = 2.0f / 192.0f;
+    const float w = (e.sw / 256.0f) * hudScale;
+    const float h = (e.sh / 192.0f) * hudScale;
+    float x = mx, y = my;
+    switch (e.corner)
+    {
+    case Corner_TopLeft:     x = mx;              y = my;              break;
+    case Corner_TopRight:    x = 1.0f - mx - w;   y = my;              break;
+    case Corner_BottomLeft:  x = mx;              y = 1.0f - my - h;   break;
+    case Corner_BottomRight: x = 1.0f - mx - w;   y = 1.0f - my - h;   break;
+    case Corner_LeftCentre:  x = mx;              y = 0.5f - h * 0.5f; break;
+    case Corner_RightTop:    x = 1.0f - mx - w;   y = my;              break;
+    case Corner_RightBottom: x = 1.0f - mx - w;   y = 1.0f - my - h;   break;
+    case Corner_TopCentre:   x = 0.5f - w * 0.5f; y = my;              break;
+    }
+    return { x, y, w, h };
+}
+
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
 {
     if (!topFB || !bottomFB || !f.active) return;
@@ -395,18 +426,32 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
         return;
     }
 
-    const int m = 2;
+    const float hs = HudScale();
     for (int i = 0; i < f.count; i++)
     {
         const Element& e = f.elems[i];
-        int dx = (e.corner == Corner_TopLeft || e.corner == Corner_BottomLeft)
-                 ? m : 256 - m - e.sw;
-        int dy = (e.corner == Corner_TopLeft || e.corner == Corner_TopRight)
-                 ? m : 192 - m - e.sh;
-        Blit(topFB, bottomFB, e.sx, e.sy, e.sw, e.sh, dx, dy);
+        const Place p = PlaceElement(e, hs);
+        const int dx = (int)(p.x * 256.0f + 0.5f), dy = (int)(p.y * 192.0f + 0.5f);
+        const int dw = (int)(p.w * 256.0f + 0.5f), dh = (int)(p.h * 192.0f + 0.5f);
+        if (dw <= 0 || dh <= 0) continue;
+
+        // Nearest-neighbour: a scaled element is a resample, and at DS
+        // resolution anything smoother turns 6px-tall glyphs to mush.
+        for (int y = 0; y < dh; y++)
+        {
+            const int ty = dy + y;
+            if (ty < 0 || ty >= 192) continue;
+            const int sy = e.sy + (int)((float)y * e.sh / (float)dh);
+            for (int x = 0; x < dw; x++)
+            {
+                const int tx = dx + x;
+                if (tx < 0 || tx >= 256) continue;
+                const int sx = e.sx + (int)((float)x * e.sw / (float)dw);
+                topFB[ty * 256 + tx] = bottomFB[sy * 256 + sx];
+            }
+        }
     }
 }
-
 }
 
 namespace PSZMix

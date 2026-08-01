@@ -254,6 +254,13 @@ whatever melonDS-android's own layout does rather than our policy.</p>
 <p>It cannot be fixed by moving the call — in the accelerated path the frame
 lives in a GL texture and <code>Composite()</code> needs CPU framebuffers.
 Android needs a real drawing path, the same shape as the Qt one.</p>
+<p><strong>Implemented, not yet confirmed on device.</strong>
+<code>PSZOverlayGLES</code> draws the same <code>Frame</code> into the frame
+texture, so the accelerated branch no longer does nothing. The texture holds
+both screens stacked, and sampling a texture while rendering into it is
+undefined, so it copies the bottom screen to a scratch texture first — one
+copy per frame, and only on frames that draw. This is written and it compiles;
+nobody has seen it run. It stays tagged as a bug until a device confirms it.</p>
 
 <h2 id="hud-art">HUD elements: rects are the wrong primitive <span class="tag gap">direction change</span></h2>
 <p>Two problems with copying rectangles out of the bottom screen, both reported
@@ -269,6 +276,31 @@ from the device:</p>
 scene, fed by values already read from RAM — plus a size control. Both need a
 drawing path that can scale and blend, which is the same missing piece as the
 OpenGL bug above.</p>
+<p><strong>Size control: <code>PSZ_HUD_ELEMENT_SCALE</code></strong>, 1.0 being
+DS-native. Elements are now sized as a fraction of the top screen rather than a
+fixed pixel multiple, so they no longer grow relative to the scene as output
+resolution rises.</p>
+<p><strong>Artwork is not committed here, deliberately.</strong> The PNGs exist
+in psz-godot, cut from the game's own sprites — and <code>git ls-files</code>
+shows they are not tracked there either, even though that repo is public. They
+ship through its asset pack instead. Committing PSZ-derived art into this
+public GPLv3 repo would break a rule the project already follows everywhere
+else: no ROM, no game assets, no savestates. So the loader reads them from a
+gitignored directory and a script populates it from a local psz-godot checkout.
+<em>How release builds get the artwork is an open decision, not an oversight.</em></p>
+
+<h2 id="android-layout">Android: no layout configuration <span class="tag ok">specified</span></h2>
+<p>A fresh install MUST open top-screen-only, centred, filling the display. No
+layout editing, and no bottom window to try to remove.</p>
+<p>Previously the default layout placed both screens, so reaching the only
+state this build supports meant hand-building a layout — and the bottom window
+could not be deleted from it at all. <code>buildSingleScreenLayout()</code>
+already existed upstream but was reachable only on dual-display devices; the
+single-display path now uses it too.</p>
+<p><strong>Known cost:</strong> that layout carries no soft input buttons, so a
+touch-only device loses on-screen controls. Handhelds with physical controls —
+what this build targets — are unaffected. <code>-Dpsz.dualScreen=true</code>
+restores the old behaviour.</p>
 
 <h2 id="bugs">Earlier reported bugs <span class="tag ok">all fixed</span></h2>
 

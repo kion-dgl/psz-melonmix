@@ -63,21 +63,18 @@ void pszDrawElement(QPainter& p, const QImage& bottom, const Element& e,
     // The target box only earns its space when it has something to say.
     if (e.corner == Corner_BottomLeft && !pszBoxHasText(bottom, src)) return;
 
-    const int w = (int)(e.sw * S), h = (int)(e.sh * S), m = (int)(6 * S);
-    int dx, dy;
-    switch (e.corner)
-    {
-    case Corner_TopLeft:     dx = (int)A.left() + m;          dy = (int)A.top() + m; break;
-    case Corner_TopRight:    dx = (int)A.right() - m - w;     dy = (int)A.top() + m; break;
-    case Corner_BottomLeft:  dx = (int)A.left() + m;          dy = (int)A.bottom() - m - h; break;
-    case Corner_BottomRight: dx = (int)A.right() - m - w;     dy = (int)A.bottom() - m - h; break;
-    // PSO-style edge anchors.
-    case Corner_LeftCentre:  dx = (int)A.left() + m;          dy = (int)(A.center().y() - h / 2); break;
-    case Corner_RightTop:    dx = (int)A.right() - m - w;     dy = (int)A.top() + m; break;
-    case Corner_RightBottom: dx = (int)A.right() - m - w;     dy = (int)A.bottom() - m - h; break;
-    case Corner_TopCentre:   dx = (int)(A.center().x() - w/2); dy = (int)A.top() + m; break;
-    default:                 dx = (int)A.left() + m;          dy = (int)A.top() + m; break;
-    }
+    // Layout comes from PSZMix::PlaceElement so this path, the DS-resolution
+    // compositor and the GL path cannot drift apart. Only the space differs:
+    // here it is window pixels inside the top screen's on-window rect A.
+    // Size is a fraction of the top screen, not a fixed window-pixel multiple of
+    // S: the elements are cut at DS resolution, and a fixed multiple made them
+    // dominate a phone-sized screen. PSZ_HUD_ELEMENT_SCALE is the size control.
+    (void)S;
+    const PSZMix::Place pl = PSZMix::PlaceElement(e, PSZMix::HudScale());
+    const int w = (int)(pl.w * A.width());
+    const int h = (int)(pl.h * A.height());
+    const int dx = (int)(A.left() + pl.x * A.width());
+    const int dy = (int)(A.top()  + pl.y * A.height());
 
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.fillRect(QRect(dx - 2, dy - 2, w + 4, h + 4), QColor(0, 0, 0, 140));

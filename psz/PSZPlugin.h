@@ -111,6 +111,17 @@ bool PatchEternalMultiplayer(u8* rom, u32 romlen);
 // is what makes a handheld build possible today.
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f);
 
+// Where an element lands on the top screen, as a fraction of it. Normalised so
+// that the DS-resolution compositor, the Qt window-pixel overlay and the GL
+// texture path can all scale ONE layout definition into their own space --
+// three hand-written copies of the same corner arithmetic is how they drift.
+struct Place { float x, y, w, h; };
+Place PlaceElement(const Element& e, float hudScale);
+
+// Element size multiplier. 1.0 is DS-native; the elements are cut at DS
+// resolution and looked oversized on a phone-sized top screen.
+float HudScale();
+
 }
 
 #endif // PSZPLUGIN_H

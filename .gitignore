@@ -14,3 +14,7 @@ sandbox*/
 
 dist/
 .DS_Store
+
+# HUD artwork is cut from the game and is fetched, never tracked.
+# See scripts/fetch-hud-art.sh for why.
+psz/art/
