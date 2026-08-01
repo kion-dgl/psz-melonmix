@@ -152,3 +152,55 @@ What this repo should do:
 cases correctly today, so nothing has to change to keep working. The open
 decision is only whether to *promote* the committable subset so that CI release
 builds ship with a HUD instead of without one.
+
+## The palette slot variable is the highest-value single unknown
+
+Four separate features are blocked on the same thing — what is in each action
+palette slot, and which slot is selected:
+
+1. **Drawing the action palette** from art instead of clipping it. 44 icons
+   exist; nothing says which three to draw.
+2. **The R-flip page indicator.** Holding R reveals three more slots; no signal
+   identifies which page is showing.
+3. **A dedicated dodge button.** Confirmed by kion: dodge is a palette item, not
+   a fixed input. Giving it its own button means saving the selected slot,
+   switching to dodge's slot, triggering, and restoring -- all per frame, which
+   the cheat engine already does mechanically. It needs the slot variable.
+4. **Any future "use item X now" binding**, which is the same shape.
+
+So this is one RE task that unblocks four things, and it should be prioritised
+above the individual features that want it.
+
+**Known failure mode for the dodge button:** if the player has not mapped dodge
+to the palette at all, there is nothing to trigger and the button does nothing.
+That is a real state, not a corner case, and the binding has to degrade quietly
+rather than appear broken.
+
+## Finding the camera, concretely
+
+kion confirmed: **L recentres the camera behind the player.** There is no
+rotation on the shoulders, which kills the cheap version of right-stick control
+-- mapping the stick to L/R cannot rotate anything.
+
+But recentring is a strong lead for *finding* the camera, because it says what
+the value becomes. On the frame L is pressed, camera yaw must equal player
+facing, and player facing is already known at `0x021A2170`.
+
+Procedure:
+
+1. Capture main RAM on the frame before L and the frame after.
+2. Read player facing from `0x021A2170`.
+3. Search the after-frame for u16s equal to that value which were NOT equal in
+   the before-frame. The camera yaw is in that set, and the set will be small.
+4. Confirm by writing to the candidate and watching the view move.
+
+The camera position is then almost certainly adjacent, in the same 1.19.12
+fixed-point layout as the player position at `0x021A214C`.
+
+Separately: <https://pszero-romhack.flizzyflam.com/> is a ROM editor that edits
+"Tekker & camera" settings. It publishes no offsets and no source, but exporting
+two BPS patches that differ only in a camera setting and diffing them yields the
+ROM-side camera parameters directly, without reverse-engineering the tool. Note
+those are static ROM *settings* (defaults such as distance and angle), not the
+live RAM state -- useful for baked-in tuning like the widescreen cheat, but not
+sufficient for stick control.
