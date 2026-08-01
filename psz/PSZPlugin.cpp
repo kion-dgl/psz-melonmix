@@ -19,6 +19,7 @@
 #include "GPU.h"
 #include "PSZOverlayIDs.h"
 #include "PSZCheats.h"
+#include "PSZArt.h"
 
 #include <cstdlib>
 #include <cstdio>
@@ -394,6 +395,27 @@ Frame Update(NDS* nds)
         return f;
     }
 
+    // Player stats for the drawn panel. Addresses from psz-re
+    // data/hud_memory_map.json, re-verified against 13 savestates -- see the
+    // constants at the top of this file. Level is in the SAVE-WORK object, not
+    // the player object.
+    {
+        const u32 sw = Read(nds, SaveWorkPtr, 4);
+        f.hp    = (int)Read(nds, CurHpAddr, 2);
+        f.maxHp = (int)Read(nds, MaxHpAddr, 2);
+        f.pp    = (int)Read(nds, CurPpAddr, 2);
+        f.maxPp = (int)Read(nds, MaxPpAddr, 2);
+        f.level = InMainRAM(nds, sw) ? (int)Read(nds, sw + 0x92, 2) : 0;
+
+        // Only claim the panel when the values are self-consistent. A zero max
+        // or an out-of-range level means we are reading a stale or half-built
+        // block, and drawing 0/0 over the game's own working panel is worse
+        // than leaving the clip in place.
+        f.panel = f.maxHp > 0 && f.maxPp > 0 && f.hp <= f.maxHp &&
+                  f.pp <= f.maxPp && f.level > 0 && f.level <= 200 &&
+                  !EnvSet("PSZ_HUD_NOART");
+    }
+
     for (int i = 0; i < NumRects; i++)
     {
         const RectDef& d = Rects[i];
@@ -467,6 +489,156 @@ Place PlaceElement(const Element& e, float hudScale)
     return { x, y, w, h };
 }
 
+// ART DRAWING.
+//
+// Decoded once and cached: the RLE in PSZArt.h exists to keep the header small,
+// not to be walked every frame.
+static const u32* DecodeArt(const PSZArtImage& img)
+{
+    static const PSZArtImage* cachedFor[4] = {};
+    static u32* cached[4] = {};
+    for (int i = 0; i < 4; i++)
+        if (cachedFor[i] == &img) return cached[i];
+
+    int slot = -1;
+    for (int i = 0; i < 4 && slot < 0; i++) if (!cachedFor[i]) slot = i;
+    if (slot < 0) return nullptr;
+
+    u32* buf = new u32[img.w * img.h];
+    u32* w = buf;
+    const u32* end = buf + img.w * img.h;
+    for (unsigned int i = 0; i + 4 < img.rleLen; i += 5)
+    {
+        const unsigned char n = img.rle[i];
+        // Framebuffer bytes are R,G,B,A -- the same order the PNG decodes to,
+        // so this is a straight pack with no channel swap.
+        const u32 px = (u32)img.rle[i + 1] | ((u32)img.rle[i + 2] << 8) |
+                       ((u32)img.rle[i + 3] << 16) | ((u32)img.rle[i + 4] << 24);
+        for (int k = 0; k < n && w < end; k++) *w++ = px;
+    }
+    cachedFor[slot] = &img;
+    cached[slot] = buf;
+    return buf;
+}
+
+// src-over, nearest-neighbour scaled. This is the whole point of the artwork:
+// the panels are not rectangles, so anything that ignores alpha drags the
+// background in around their edges.
+static void BlitArt(u32* dst, const PSZArtImage& img,
+                    int dx, int dy, int dw, int dh)
+{
+    const u32* src = DecodeArt(img);
+    if (!src || dw <= 0 || dh <= 0) return;
+
+    for (int y = 0; y < dh; y++)
+    {
+        const int ty = dy + y;
+        if (ty < 0 || ty >= 192) continue;
+        const int sy = y * img.h / dh;
+        for (int x = 0; x < dw; x++)
+        {
+            const int tx = dx + x;
+            if (tx < 0 || tx >= 256) continue;
+            const u32 s = src[sy * img.w + (x * img.w / dw)];
+            const u32 a = s >> 24;
+            if (!a) continue;
+            if (a == 255) { dst[ty * 256 + tx] = s; continue; }
+
+            const u32 d = dst[ty * 256 + tx];
+            u32 out = 0xFF000000u;
+            for (int c = 0; c < 3; c++)
+            {
+                const u32 sc = (s >> (8 * c)) & 0xFF, dc = (d >> (8 * c)) & 0xFF;
+                out |= (((sc * a + dc * (255 - a)) / 255) & 0xFF) << (8 * c);
+            }
+            dst[ty * 256 + tx] = out;
+        }
+    }
+}
+
+// Digits, right-aligned at (rx, y). Ours, not the game's -- see PSZArt.h.
+static int DrawNumber(u32* dst, int value, int rx, int y, u32 rgb)
+{
+    char buf[12];
+    int n = std::snprintf(buf, sizeof(buf), "%d", value);
+    if (n <= 0) return 0;
+
+    int x = rx - n * (kGlyphW + 1);
+    for (int i = 0; i < n; i++)
+    {
+        const char* p = std::strchr(kGlyphChars, buf[i]);
+        if (p)
+        {
+            const unsigned char* g = kGlyphs[p - kGlyphChars];
+            for (int gy = 0; gy < kGlyphH; gy++)
+            {
+                const int ty = y + gy;
+                if (ty < 0 || ty >= 192) continue;
+                for (int gx = 0; gx < kGlyphW; gx++)
+                {
+                    const int tx = x + gx;
+                    if (tx < 0 || tx >= 256 || !g[gy * kGlyphW + gx]) continue;
+                    dst[ty * 256 + tx] = 0xFF000000u | rgb;
+                }
+            }
+        }
+        x += kGlyphW + 1;
+    }
+    return n * (kGlyphW + 1);
+}
+
+// The player panel, drawn from values instead of clipped from the bottom
+// screen. Layout is against hp-pp.png's own 256x120 art, scaled to the
+// destination box, so retuning the box does not need the numbers moved.
+static void DrawPlayerPanel(u32* dst, const Frame& f)
+{
+    const float hs = HudScale();
+    const int dw = (int)(124 * hs), dh = (int)(50 * hs);
+    const int dx = 2, dy = 2;
+    BlitArt(dst, kArt_panel, dx, dy, dw, dh);
+
+    // MEASURED off hp-pp.png rather than guessed: the bar troughs are the long
+    // dark runs at rows 61-68 and 97-104, both spanning x 75..237 of a 256x120
+    // image. Interior is inset two rows from the trough border.
+    const float kBarX0 = 77.0f / 256.0f, kBarX1 = 235.0f / 256.0f;
+    const float kBarH  = 4.0f / 120.0f;
+    struct Bar { float cur, max; float y; u32 rgb; };
+    const Bar bars[2] = {
+        { (float)f.hp, (float)(f.maxHp ? f.maxHp : 1), 63.0f / 120.0f, 0x40FF60 },
+        { (float)f.pp, (float)(f.maxPp ? f.maxPp : 1), 99.0f / 120.0f, 0x40A0FF },
+    };
+    for (const Bar& b : bars)
+    {
+        float frac = b.cur / b.max;
+        if (frac < 0.0f) frac = 0.0f;
+        if (frac > 1.0f) frac = 1.0f;
+
+        const int bx = dx + (int)(kBarX0 * dw);
+        const int bw = (int)((kBarX1 - kBarX0) * dw * frac);
+        const int by = dy + (int)(b.y * dh);
+        const int bh = (int)(kBarH * dh) < 1 ? 1 : (int)(kBarH * dh);
+        for (int y = by; y < by + bh; y++)
+        {
+            if (y < 0 || y >= 192) continue;
+            for (int x = bx; x < bx + bw; x++)
+            {
+                if (x < 0 || x >= 256) continue;
+                dst[y * 256 + x] = 0xFF000000u | b.rgb;
+            }
+        }
+
+        // Numerals sit on the LABEL row, not inside the bar: the trough
+        // interior is 4px and a glyph is 5px, so centring them in the bar puts
+        // them half below it. Current left of the art's own slash, max right.
+        const int ny = dy + (int)((b.y - 10.0f / 120.0f) * dh);
+        DrawNumber(dst, (int)b.cur, dx + (int)(0.60f * dw), ny, 0xFFFFFF);
+        DrawNumber(dst, (int)b.max, dx + (int)(0.93f * dw), ny, 0xFFFFFF);
+    }
+
+    // Level sits to the RIGHT of the art's own "Lv" label.
+    DrawNumber(dst, f.level, dx + (int)(0.52f * dw), dy + (int)(0.16f * dh), 0xFFFFFF);
+}
+
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
 {
     if (!topFB || !bottomFB || !f.active) return;
@@ -501,10 +673,15 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
         return;
     }
 
+    // The player panel is DRAWN, not clipped -- our art, our numerals, from
+    // values read out of RAM. The clip for it is skipped below.
+    if (f.panel) DrawPlayerPanel(topFB, f);
+
     const float hs = HudScale();
     for (int i = 0; i < f.count; i++)
     {
         const Element& e = f.elems[i];
+        if (f.panel && e.corner == Corner_TopLeft) continue;   // drawn instead
         const Place p = PlaceElement(e, hs);
         const int dx = (int)(p.x * 256.0f + 0.5f), dy = (int)(p.y * 192.0f + 0.5f);
         const int dw = (int)(p.w * 256.0f + 0.5f), dh = (int)(p.h * 192.0f + 0.5f);

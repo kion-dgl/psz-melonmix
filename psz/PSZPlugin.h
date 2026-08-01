@@ -73,6 +73,11 @@ struct Frame
     bool keepTop = false;
     int ktx = 0, kty = 0, ktw = 0, kth = 0;
 
+    // Player stats, read from RAM so the panel can be DRAWN rather than clipped.
+    // Valid only while inGame; panel stays false everywhere else.
+    bool panel = false;
+    int hp = 0, maxHp = 0, pp = 0, maxPp = 0, level = 0;
+
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
     Room rooms[MaxRooms];
