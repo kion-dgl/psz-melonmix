@@ -32,7 +32,14 @@ namespace PSZMix
 using namespace melonDS;
 
 // Where an element is anchored on the top screen.
-enum Corner { Corner_TopLeft, Corner_TopRight, Corner_BottomLeft, Corner_BottomRight };
+// Corner anchors for ported elements. The last four exist for the PSO-style
+// menu, which spreads a menu's own panels to the screen edges instead of
+// presenting the whole bottom screen -- so the field stays visible between them.
+enum Corner
+{
+    Corner_TopLeft, Corner_TopRight, Corner_BottomLeft, Corner_BottomRight,
+    Corner_LeftCentre, Corner_RightTop, Corner_RightBottom, Corner_TopCentre
+};
 
 // A piece of the bottom screen to move to the top one. Source rect is in
 // bottom-screen pixels (256x192).

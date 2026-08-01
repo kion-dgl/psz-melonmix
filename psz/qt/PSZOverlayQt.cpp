@@ -64,10 +64,20 @@ void pszDrawElement(QPainter& p, const QImage& bottom, const Element& e,
     if (e.corner == Corner_BottomLeft && !pszBoxHasText(bottom, src)) return;
 
     const int w = (int)(e.sw * S), h = (int)(e.sh * S), m = (int)(6 * S);
-    int dx = (e.corner == Corner_TopLeft || e.corner == Corner_BottomLeft)
-             ? (int)A.left() + m : (int)A.right() - m - w;
-    int dy = (e.corner == Corner_TopLeft || e.corner == Corner_TopRight)
-             ? (int)A.top() + m : (int)A.bottom() - m - h;
+    int dx, dy;
+    switch (e.corner)
+    {
+    case Corner_TopLeft:     dx = (int)A.left() + m;          dy = (int)A.top() + m; break;
+    case Corner_TopRight:    dx = (int)A.right() - m - w;     dy = (int)A.top() + m; break;
+    case Corner_BottomLeft:  dx = (int)A.left() + m;          dy = (int)A.bottom() - m - h; break;
+    case Corner_BottomRight: dx = (int)A.right() - m - w;     dy = (int)A.bottom() - m - h; break;
+    // PSO-style edge anchors.
+    case Corner_LeftCentre:  dx = (int)A.left() + m;          dy = (int)(A.center().y() - h / 2); break;
+    case Corner_RightTop:    dx = (int)A.right() - m - w;     dy = (int)A.top() + m; break;
+    case Corner_RightBottom: dx = (int)A.right() - m - w;     dy = (int)A.bottom() - m - h; break;
+    case Corner_TopCentre:   dx = (int)(A.center().x() - w/2); dy = (int)A.top() + m; break;
+    default:                 dx = (int)A.left() + m;          dy = (int)A.top() + m; break;
+    }
 
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.fillRect(QRect(dx - 2, dy - 2, w + 4, h + 4), QColor(0, 0, 0, 140));

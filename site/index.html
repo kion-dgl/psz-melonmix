@@ -170,6 +170,21 @@ screen carries real content — the race description in character create, the
 hides information the dual-screen original shows. The menu must be readable
 <em>and</em> the top screen must remain readable.</p>
 
+<h2>PSO-style menu <span class="tag ok">opt-in</span></h2>
+<p><code>PSZ_MENU_PSO=1</code> stops presenting the menu as a screen-shaped thing
+on top of the game and spreads <em>its own panels</em> to the edges instead: the
+player strip top-left, the heading top-centre, the description top-right, the
+command list down the left, the stats panel bottom-right. The field stays visible
+between them.</p>
+<p>Source rects are the main menu's panels measured at native resolution, each
+overridable (<code>PSZ_MENU_LIST</code>, <code>PSZ_MENU_DESC</code>,
+<code>PSZ_MENU_STATS</code>, <code>PSZ_MENU_TITLE</code>,
+<code>PSZ_MENU_WHO</code>).</p>
+<p><strong>Main menu only, which is why it is opt-in.</strong> Nothing yet
+identifies <em>which</em> menu is open, so the item menu and the Mag screen would
+be sliced by rects that do not describe them. Identifying the open menu is the
+work that would make this the default.</p>
+
 <h2>Single-screen output <span class="tag ok">specified</span></h2>
 <figure>
   <img src="img/output-field.png" alt="Single-screen output, field">

@@ -34,6 +34,29 @@ static constexpr u32 AspectVal = 0x020346E0;
 // Source rects on the bottom screen, measured from a field capture and checked
 // again in town. Overridable so they can be retuned without a rebuild.
 struct RectDef { const char* env; int x, y, w, h; Corner corner; };
+
+// PSO-STYLE MENU.
+//
+// The default modal presentation blows the whole bottom screen up in the middle
+// of the screen. It is readable, but it is still a screen-shaped thing sitting
+// on top of the game. PSO instead puts the menu's parts at the edges and leaves
+// the world visible between them.
+//
+// These are the main menu's own panels, measured at native resolution: the
+// command list, the description box, the stats panel, the heading and the
+// player strip. Spreading them is why Corner gained edge anchors.
+//
+// MAIN MENU ONLY. Nothing yet identifies WHICH menu is open, so the item menu
+// and the Mag screen would be sliced by rects that do not describe them. Opt in
+// with PSZ_MENU_PSO=1 until that is solved.
+static const RectDef MenuRects[] = {
+    { "PSZ_MENU_LIST",   4, 36,  80, 136, Corner_LeftCentre  },
+    { "PSZ_MENU_DESC",  94, 30, 160,  36, Corner_RightTop    },
+    { "PSZ_MENU_STATS", 92, 76, 164,  92, Corner_RightBottom },
+    { "PSZ_MENU_TITLE",128,  2, 112,  18, Corner_TopCentre   },
+    { "PSZ_MENU_WHO",    2,  2,  86,  26, Corner_TopLeft     },
+};
+static constexpr int NumMenuRects = sizeof(MenuRects) / sizeof(MenuRects[0]);
 static const RectDef Rects[] = {
     { "PSZ_HUD_PANELRECT",   2,   4, 124, 50, Corner_TopLeft     },  // level / HP / PP
     { "PSZ_HUD_MAPRECT",   143, 109,  70, 80, Corner_TopRight    },  // room map + key row
@@ -290,6 +313,28 @@ Frame Update(NDS* nds)
         // Draw nothing and let it through untouched.
         if (lastOverlay >= 0 && !OverlayWantsBottomScreen(lastOverlay))
             return f;                                  // active stays false
+
+        // PSO-style: spread the main menu's own panels to the edges rather than
+        // presenting the whole bottom screen. Only inside the main game, where
+        // control mode 5 means a full-screen menu is up -- the pre-game screens
+        // are laid out differently and are left alone.
+        if (inGame && EnvSet("PSZ_MENU_PSO"))
+        {
+            for (int i = 0; i < NumMenuRects; i++)
+            {
+                const RectDef& d = MenuRects[i];
+                Element e { d.x, d.y, d.w, d.h, d.corner };
+                if (const char* o = std::getenv(d.env))
+                {
+                    int x, y, w, h;
+                    if (std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h) == 4)
+                    { e.sx = x; e.sy = y; e.sw = w; e.sh = h; }
+                }
+                f.elems[f.count++] = e;
+            }
+            f.active = true;
+            return f;                                  // modal stays false
+        }
 
         f.active = true;
         f.modal = true;
