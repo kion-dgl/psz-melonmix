@@ -132,6 +132,11 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f);
 // Returns false when there is nothing to draw, so the caller can skip upload.
 bool RenderArtLayer(u32* out256x192, const Frame& f);
 
+// Tell the core whether the contextual info box currently has text in it.
+// Only needed by frontends whose frames live on the GPU, where the core cannot
+// read the pixels itself.
+void SetBoxHasTextHint(bool hasText);
+
 // Where an element lands on the top screen, as a fraction of it. Normalised so
 // that the DS-resolution compositor, the Qt window-pixel overlay and the GL
 // texture path can all scale ONE layout definition into their own space --

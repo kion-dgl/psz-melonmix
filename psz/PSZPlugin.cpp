@@ -81,6 +81,20 @@ static const RectDef Rects[] = {
 };
 static constexpr int NumRects = sizeof(Rects) / sizeof(Rects[0]);
 
+// Frames to keep presenting the outgoing mode after the game switches, so a
+// cross-fade covers the change. Six is what looked right on the Retroid at the
+// title-to-file-select fade; PSZ_TRANSITION_HOLD retunes it.
+static int TransitionHold()
+{
+    static const int n = [] {
+        const char* v = std::getenv("PSZ_TRANSITION_HOLD");
+        if (!v) return 6;
+        const int k = std::atoi(v);
+        return (k >= 0 && k <= 60) ? k : 6;
+    }();
+    return n;
+}
+
 static bool EnvSet(const char* name)
 {
     const char* v = std::getenv(name);
@@ -325,6 +339,34 @@ static void ReadRooms(NDS* nds, Frame& f)
     }
 }
 
+// Is there text in this box? Counts dark pixels inside an inset margin, since
+// the game draws contextual text dark on a pale panel. Inset so the panel's own
+// border does not count as content.
+static bool BoxHasText(const u32* bottomFB, const Element& e)
+{
+    const int x0 = e.sx + 6, y0 = e.sy + 6;
+    const int x1 = e.sx + e.sw - 6, y1 = e.sy + e.sh - 6;
+    if (x1 <= x0 || y1 <= y0) return false;
+
+    int dark = 0;
+    for (int y = y0; y < y1; y++)
+        for (int x = x0; x < x1; x++)
+        {
+            const u32 c = bottomFB[y * 256 + x];
+            const int sum = (int)((c >> 16) & 0xFF) + (int)((c >> 8) & 0xFF) +
+                            (int)(c & 0xFF);
+            if (sum < 260) dark++;
+        }
+    return dark > 24;
+}
+
+// The GL frontend cannot read framebuffer pixels cheaply, so it measures the
+// box itself on a throttled readback and reports the answer here. Defaults to
+// true: an unnecessary panel is a smaller failure than a missing prompt.
+static bool gBoxHasTextHint = true;
+void SetBoxHasTextHint(bool v) { gBoxHasTextHint = v; }
+static bool BoxHasTextHint() { return gBoxHasTextHint; }
+
 Frame Update(NDS* nds)
 {
     Frame f;
@@ -347,14 +389,48 @@ Frame Update(NDS* nds)
         const int ov = ResidentOverlay(nds);
         if (ov >= 0) lastOverlay = ov;
 
+        // BOOT vs CUTSCENE, without settling what ov16/ov17 are called.
+        //
+        // psz-re names ov16/ov17 "intro logo" and "attract cutscene"; this
+        // project's captures call them the cutscene and dialogue players. That
+        // conflict is still open, and flipping either one wholesale would fix
+        // boot and break cutscenes, or the reverse.
+        //
+        // Sequence settles it without naming anything: everything before the
+        // FIRST title is boot. The health-and-safety and ESRB notices are on
+        // the top screen and the SEGA logo on the bottom, so boot wants the
+        // bottom screen -- the opposite of what a cutscene wants from the very
+        // same overlay id.
+        static bool seenTitle = false;
+        if (lastOverlay == 0) seenTitle = true;
+        const bool booting = !seenTitle;
+
+        // TRANSITION HOLD. The game cross-fades between modes over several
+        // frames. Switching presentation the instant the overlay changes
+        // uncovered the raw bottom screen for a few frames BEFORE the fade
+        // reached white. Holding the outgoing mode briefly lets the fade cover
+        // the switch.
+        //
+        // shown   what is being presented
+        // pending what the game has actually moved to
+        static int shown = -1, pending = -1, hold = 0;
+        if (lastOverlay != shown)
+        {
+            if (lastOverlay != pending) { pending = lastOverlay; hold = TransitionHold(); }
+            if (hold > 0) hold--;
+            if (hold <= 0) shown = pending;
+        }
+        const int effectiveOverlay = shown >= 0 ? shown : lastOverlay;
+
         // Cutscene, dialogue, character create, ending: the top screen is the
         // content. Draw nothing and let it through untouched.
-        if (lastOverlay >= 0 && !OverlayWantsBottomScreen(lastOverlay))
+        if (!booting && effectiveOverlay >= 0 &&
+            !OverlayWantsBottomScreen(effectiveOverlay))
             return f;                                  // active stays false
 
         // The title needs both screens: PRESS START is on the bottom, the logo
         // on the top. Presenting the bottom alone throws the logo away.
-        if (lastOverlay >= 0 && OverlayKeepsTopSlice(lastOverlay))
+        if (!booting && effectiveOverlay >= 0 && OverlayKeepsTopSlice(effectiveOverlay))
         {
             // Estimated from a device capture of the title, not measured
             // against the framebuffer -- retune with PSZ_TITLE_LOGORECT.
@@ -416,6 +492,29 @@ Frame Update(NDS* nds)
                   !EnvSet("PSZ_HUD_NOART");
     }
 
+    // THE INFO PANEL EARNS ITS SPACE.
+    //
+    // The bottom-left box is contextual: most of the time it is empty, and a
+    // permanently visible empty panel is just clutter on a single screen. The
+    // check counts dark pixels inside the box, because the game draws that text
+    // dark on a pale panel.
+    //
+    // This used to live in the Qt overlay only, so the GL path -- the one that
+    // matters now -- showed the box unconditionally. Moving it into the core
+    // means every frontend gets it from one implementation.
+    // GetFramebuffers() returns FALSE under an accelerated renderer -- there are
+    // no RAM framebuffers to read, the frame only exists as a GL texture. So
+    // this test works on the software path and cannot work here on the GL one.
+    //
+    // Rather than reading pixels back off the GPU every frame, which would cost
+    // the sync stall the -O2 fix just bought back, the GL frontend supplies its
+    // own answer through SetBoxHasTextHint(). Absent a hint, the box shows --
+    // failing toward visible, since a missing prompt is worse than a spare one.
+    void* topPtr = nullptr;
+    void* botPtr = nullptr;
+    const bool haveCpuFB = nds->GPU.GetFramebuffers(&topPtr, &botPtr) && botPtr;
+    const u32* bottomFB = haveCpuFB ? (const u32*)botPtr : nullptr;
+
     for (int i = 0; i < NumRects; i++)
     {
         const RectDef& d = Rects[i];
@@ -429,6 +528,11 @@ Frame Update(NDS* nds)
         if (e.sw <= 0 || e.sh <= 0 || e.sx < 0 || e.sy < 0 ||
             e.sx + e.sw > 256 || e.sy + e.sh > 192)
             continue;
+        if (e.corner == Corner_BottomLeft)
+        {
+            const bool has = bottomFB ? BoxHasText(bottomFB, e) : BoxHasTextHint();
+            if (!has) continue;
+        }
         f.elems[f.count++] = e;
     }
 

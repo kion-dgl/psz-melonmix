@@ -60,8 +60,9 @@ void pszDrawElement(QPainter& p, const QImage& bottom, const Element& e,
 {
     QRect src(e.sx, e.sy, e.sw, e.sh);
 
-    // The target box only earns its space when it has something to say.
-    if (e.corner == Corner_BottomLeft && !pszBoxHasText(bottom, src)) return;
+    // The "has text" test now lives in PSZMix::Update, so an element that
+    // reached here has already earned its space -- one implementation for
+    // every frontend rather than this path having its own.
 
     // Layout comes from PSZMix::PlaceElement so this path, the DS-resolution
     // compositor and the GL path cannot drift apart. Only the space differs:
