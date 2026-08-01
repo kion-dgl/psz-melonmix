@@ -38,8 +38,8 @@ These are cut from the same panels the rects currently clip.
 **No target-box art exists** for `PSZ_HUD_TGTRECT` (124×56). That element stays
 a clip until someone draws one.
 
-`scripts/fetch-hud-art.sh` copies them into a gitignored `psz/art/`. They are
-not committed, and that is deliberate — see "Licensing" below.
+`scripts/fetch-hud-art.sh` copies them into a gitignored `psz/art/`. Whether any
+of it can be committed varies per file — see "Licensing" below.
 
 ## How to get pixels into the build
 
@@ -75,9 +75,9 @@ Ordered by what unblocks the most:
    `src-over` blend instead of the straight copy `Blit` does.
 3. **An atlas** so the GL path binds one texture per frame rather than one per
    element.
-4. **Digit glyphs.** Drawing HP/PP/level as *values* needs numbers. There is no
-   font in this build. Either cut digits from psz-godot too, or draw a tiny
-   fixed 3×5 bitmap font in code.
+4. **Digit glyphs.** Drawing HP/PP/level as *values* needs numbers, and there is
+   no font in this build. See "Text and glyphs" below — this is the easy half,
+   since the licence is a free choice.
 
 ## The data behind each element
 
@@ -97,22 +97,58 @@ is where each element stands:
 So the player panel and the minimap can be drawn from values today. The action
 palette needs RE first, and the info panel will always be a clip.
 
-## Licensing — why the art is not committed
+## Text and glyphs — a separate, easier problem
 
-The PNGs are cut from Phantasy Star Zero's own sprites. psz-godot is a public
-repo and **does not track them either** — `git ls-files assets/hud/*.png` comes
-back empty there; they ship through that project's asset pack, separate from
-source.
+**We draw this text, not the game.** The overlay composites onto the frame after
+melonDS has produced it, so those pixels are ours. The digits do not have to
+match the ROM's font, come from the ROM, or be extracted from anything — which
+makes both the source and the licence a free choice.
 
-This repo has the same rule, stated harder: no ROM, no game assets, no
-savestates. Committing PSZ-derived art here would break it.
+Three options, all redistributable, so unlike the panel art these **can be
+committed here**:
 
-So: fetched, never tracked. Contributors with a psz-godot checkout get a HUD;
-everyone else gets the bottom-screen clips, which is what the build did before
-the artwork existed.
+- **A pixel font from Google Fonts** (Silkscreen, Pixelify Sans — OFL).
+  Recommended for HP/PP/level. At DS scale a digit is roughly 6–8px tall, and
+  fonts drawn *for* that size beat a hinted desktop font scaled down to it.
+- **JetBrains Mono** (OFL) is already vendored and tracked in psz-godot, so it
+  costs nothing to reuse — but it is a desktop mono face, and 6px is not where
+  it is good.
+- **Kenney input-prompts** (CC0, 8078 files, tracked in psz-godot). Not a
+  numeric font, but the right source for *button glyphs* — the START/Skip
+  prompts, and the R indicator for the palette page flip. Worth taking for that
+  specifically.
 
-**Open decision:** baking the art into a generated header puts it in the
-*binary*, and release builds are published from CI. That is a distribution
-question, not a code one, and it is kion's call — the same call psz-godot
-already made by publishing its pack outside git. Until it is decided, the
-generated header should be gitignored and CI releases built without art.
+Either way the TTF is **pre-rasterised at build time** into the same generated
+header as the art. No runtime rasteriser, no `stb_truetype`, no font file to
+ship. Rendering a font to bitmaps and distributing those is permitted under OFL
+and trivially under CC0.
+
+## Licensing — what is committable and what is not
+
+This splits per file, and the earlier blanket claim here ("psz-godot does not
+track this art either") was **wrong**. Checked file by file:
+
+| Asset | Tracked in public psz-godot? |
+|---|---|
+| `ui/psz-palette/*` (frame + 44 icons) | **yes** |
+| `ui/hud/map.png`, `map_grid.png` | **yes** |
+| `hud/hp-pp.png` (player panel) | no |
+| `images/logo.png` (title) | no |
+
+So most of the palette and minimap art is already published by its author in a
+public repo; only the player panel and the title logo are held back. Whatever
+judgement produced that split is kion's and it is per-file, not a blanket rule.
+
+What this repo should do:
+
+- **Fonts and Kenney glyphs**: commit them. OFL and CC0 are made for this.
+- **Art already public in psz-godot**: committing it here changes nothing about
+  its exposure, so this is a low-stakes call rather than a rule violation.
+- **`hp-pp.png` and `logo.png`**: keep fetching, do not commit. These are the
+  two their author chose not to publish, and that choice should be honoured
+  here rather than quietly reversed by a different repo.
+
+`scripts/fetch-hud-art.sh` populating a gitignored `psz/art/` handles all four
+cases correctly today, so nothing has to change to keep working. The open
+decision is only whether to *promote* the committable subset so that CI release
+builds ship with a HUD instead of without one.
