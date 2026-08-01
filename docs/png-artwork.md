@@ -204,3 +204,43 @@ ROM-side camera parameters directly, without reverse-engineering the tool. Note
 those are static ROM *settings* (defaults such as distance and angle), not the
 live RAM state -- useful for baked-in tuning like the widescreen cheat, but not
 sufficient for stick control.
+
+### What the flizzyflam ROM editor actually reveals about the camera
+
+Read out of its client-side bundle (`assets/rom-editor-*.js`), since the page
+itself documents nothing. Findings:
+
+The **field camera distance is a hardcoded constant in ARM9 code**, not a RAM
+variable. The editor's presets are halfword values:
+
+| preset | halfword | Thumb |
+|---|---|---|
+| Original | `0x2205` | `MOVS r2, #5` |
+| 20% farther | `0x2206` | `MOVS r2, #6` |
+| 40% farther (its "recommended") | `0x2207` | `MOVS r2, #7` |
+| 60% farther | `0x2208` | `MOVS r2, #8` |
+
+6/5, 7/5 and 8/5 are exactly 20%, 40% and 60%, which is what confirms the
+reading. It patches **several sites at once** and refuses to proceed unless all
+of them currently read `0x2205`.
+
+Consequences for this project:
+
+- This is bakeable **exactly like the widescreen cheat** — a fixed constant, no
+  new machinery. "Wider camera" is a realistic default-on QoL item.
+- It does **not** help right-stick control. A distance multiplier in code is not
+  the live camera orientation, so the `0x2170`-facing search above is still the
+  route to that.
+- **Its offsets do not transfer.** The bundle's own error message says
+  "supported **European** ROM"; ours is USA (`C24E`). The instruction pattern
+  transfers, the addresses do not, so the sites must be located in our ROM.
+- The offset table itself could not be extracted from the bundle — it is not a
+  literal array in the shipped chunk. Locating the sites in the USA ROM is
+  ours to do.
+- Its own roadmap lists `CAM-01 "Wider camera"` as still unproven, with next
+  step "change one candidate camera constant in an emulator trace and verify
+  field of view versus distance". So even its author treats the distance-versus-
+  FOV question as open, and we should verify rather than assume.
+
+The bundle also carries `eternalTowerMultiplayer` and `eternalTowerStartFloor`,
+which is the same Eternal-quest ground this build already patches.
