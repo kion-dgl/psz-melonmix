@@ -697,6 +697,18 @@ static bool gBoxHasTextHint = true;
 void SetBoxHasTextHint(bool v) { gBoxHasTextHint = v; }
 static bool BoxHasTextHint() { return gBoxHasTextHint; }
 
+static void LogFrame(const Frame& f, int heldOv, bool inGame, bool menuShown)
+{
+    if (!EnvSet("PSZ_OV_DEBUG")) return;
+    static int last = -1;
+    const int kind = !f.active ? 0 : f.modal ? 1 : 2;   // 0 top, 1 bottom, 2 HUD
+    if (kind == last) return;
+    last = kind;
+    PszLog("PRESENT %s (ov=%d inGame=%d menu=%d elems=%d)",
+           kind == 0 ? "top-untouched" : kind == 1 ? "BOTTOM-SCREEN" : "top+HUD",
+           heldOv, inGame ? 1 : 0, menuShown ? 1 : 0, f.count);
+}
+
 Frame Update(NDS* nds)
 {
     Frame f;
@@ -847,6 +859,9 @@ Frame Update(NDS* nds)
 
     const bool gameplayMode = (heldOv < 0) ? inGame : (heldOv == 4);
 
+    // Log what is PRESENTED, not just what was decided. Four rounds of this
+    // were spent reasoning about inputs to a decision without ever recording
+    // the decision itself.
     if (EnvSet("PSZ_OV_DEBUG"))
     {
         static int lastLogged = -2;
@@ -895,7 +910,7 @@ Frame Update(NDS* nds)
         // content. Draw nothing and let it through untouched.
         if (booting ||
             (effectiveOverlay >= 0 && !OverlayWantsBottomScreen(effectiveOverlay)))
-            return f;                                  // active stays false
+            { LogFrame(f, heldOv, inGame, menuShown); return f; }
 
         // The title needs both screens: PRESS START is on the bottom, the logo
         // on the top. Presenting the bottom alone throws the logo away.
@@ -954,6 +969,7 @@ Frame Update(NDS* nds)
 
         f.active = true;
         f.modal = true;
+        LogFrame(f, heldOv, inGame, menuShown);
         return f;
     }
 
@@ -1078,6 +1094,7 @@ Frame Update(NDS* nds)
 
     ReadRooms(nds, f);
     f.active = true;
+    LogFrame(f, heldOv, inGame, menuShown);
     return f;
 }
 
