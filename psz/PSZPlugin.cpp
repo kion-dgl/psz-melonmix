@@ -25,6 +25,7 @@
 #include <android/log.h>
 #endif
 #include <cstdarg>
+#include <cstdio>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
@@ -46,6 +47,78 @@ static void PszLog(const char* fmt, ...)
 #else
     std::fprintf(stderr, "[psz] %s\n", buf);
 #endif
+}
+
+// SETTINGS: environment first, then a config file.
+//
+// Every knob in this file was reachable only through the environment, which on
+// Android means not reachable at all -- no PSZ_MAP_OPACITY, no PSZ_CAM_SPEED,
+// no PSZ_HUD_ELEMENT_SCALE, on the one platform this build actually targets.
+// Tuning values were being baked in and rebuilt one at a time because of it.
+//
+// So an absent variable falls back to a "key=value" line in psz.conf, looked
+// for beside the ROM. Read once, on first use.
+static const char* SettingRaw(const char* name)
+{
+    if (const char* v = std::getenv(name)) return v;
+
+    static char buf[4096];
+    static bool loaded = false;
+    if (!loaded)
+    {
+        loaded = true;
+        buf[0] = 0;
+        // The app's own internal files dir is first because it is the only
+        // one reachable on this Retroid: its ROM denies adb every /sdcard
+        // path, so a config pushed there cannot be written, and scoped storage
+        // means the app may not be able to read it even if it were. run-as can
+        // write the internal dir on a debug build, and the app can always read
+        // it.
+        static const char* paths[] = {
+            "/data/data/com.dashgl.pszmelonmix.dev/files/psz.conf",
+            "/data/data/com.dashgl.pszmelonmix/files/psz.conf",
+            "/sdcard/Download/melonmix/psz.conf",
+            "psz.conf",
+        };
+        for (const char* p : paths)
+        {
+            if (std::FILE* f = std::fopen(p, "rb"))
+            {
+                const size_t n = std::fread(buf, 1, sizeof(buf) - 1, f);
+                buf[n] = 0;
+                std::fclose(f);
+                PszLog("settings loaded from %s (%u bytes)", p, (unsigned)n);
+                break;
+            }
+        }
+    }
+    if (!buf[0]) return nullptr;
+
+    // Match "name" at the start of a line, then take the rest after '='.
+    const size_t len = std::strlen(name);
+    for (const char* p = buf; *p; )
+    {
+        const char* eol = std::strchr(p, '\n');
+        if (!eol) eol = p + std::strlen(p);
+        if ((size_t)(eol - p) > len && std::strncmp(p, name, len) == 0 && p[len] == '=')
+        {
+            static char val[128];
+            size_t n = (size_t)(eol - (p + len + 1));
+            if (n >= sizeof(val)) n = sizeof(val) - 1;
+            std::memcpy(val, p + len + 1, n);
+            while (n && (val[n - 1] == '\r' || val[n - 1] == ' ')) n--;
+            val[n] = 0;
+            return val;
+        }
+        p = (*eol) ? eol + 1 : eol;
+    }
+    return nullptr;
+}
+
+static bool EnvSet(const char* name)
+{
+    const char* v = SettingRaw(name);
+    return v && *v && *v != '0';
 }
 
 // PLAYER STATS, for the panels we draw ourselves rather than clip.
@@ -167,7 +240,7 @@ static constexpr int NumRects = sizeof(Rects) / sizeof(Rects[0]);
 static float MapOpacity()
 {
     static const float a = [] {
-        const char* v = std::getenv("PSZ_MAP_OPACITY");
+        const char* v = SettingRaw("PSZ_MAP_OPACITY");
         if (!v) return 0.6f;
         const float f = (float)std::atof(v);
         return (f > 0.05f && f <= 1.0f) ? f : 0.6f;
@@ -180,7 +253,7 @@ static float MapOpacity()
 static int PointerDebounce()
 {
     static const int n = [] {
-        const char* v = std::getenv("PSZ_POINTER_DEBOUNCE");
+        const char* v = SettingRaw("PSZ_POINTER_DEBOUNCE");
         if (!v) return 24;
         const int k = std::atoi(v);
         return (k >= 0 && k <= 300) ? k : 24;
@@ -191,7 +264,7 @@ static int PointerDebounce()
 static int TransitionHold()
 {
     static const int n = [] {
-        const char* v = std::getenv("PSZ_TRANSITION_HOLD");
+        const char* v = SettingRaw("PSZ_TRANSITION_HOLD");
         if (!v) return 10;
         const int k = std::atoi(v);
         return (k >= 0 && k <= 60) ? k : 10;
@@ -199,11 +272,7 @@ static int TransitionHold()
     return n;
 }
 
-static bool EnvSet(const char* name)
-{
-    const char* v = std::getenv(name);
-    return v && *v && *v != '0';
-}
+
 
 // The big artwork HUD, off by default -- see DrawPlayerReadout.
 static bool UseArtHud()
@@ -281,7 +350,7 @@ static void Write(NDS* nds, u32 addr, u32 val, int bytes)
 static void ApplyCheat(NDS* nds, const Cheat& c)
 {
     bool enabled = c.on;
-    if (const char* v = std::getenv(c.env)) enabled = (*v && *v != '0');
+    if (const char* v = SettingRaw(c.env)) enabled = (*v && *v != '0');
     if (!enabled) return;
 
     bool active = true;      // inside a conditional that currently matches
@@ -515,7 +584,7 @@ void SetCameraStick(float x)
 static int CameraSpeed()
 {
     static const int n = [] {
-        const char* v = std::getenv("PSZ_CAM_SPEED");
+        const char* v = SettingRaw("PSZ_CAM_SPEED");
         if (!v) return 400;
         const int k = std::atoi(v);
         return (k >= -4000 && k <= 4000 && k != 0) ? k : 400;
@@ -574,7 +643,7 @@ Frame Update(NDS* nds)
     // most are an 0x130-stride array of per-object copies, so the question is
     // which one the renderer actually reads. Writing is the only way to tell,
     // and writing is what the feature needs regardless.
-    if (const char* v = std::getenv("PSZ_CAM_PROBE"))
+    if (const char* v = SettingRaw("PSZ_CAM_PROBE"))
     {
         unsigned int addr = 0; int delta = 0;
         if (std::sscanf(v, "%x,%d", &addr, &delta) == 2 && InMainRAM(nds, addr))
@@ -711,7 +780,7 @@ Frame Update(NDS* nds)
             // Estimated from a device capture of the title, not measured
             // against the framebuffer -- retune with PSZ_TITLE_LOGORECT.
             int x = 16, y = 68, w = 224, h = 56;
-            if (const char* o = std::getenv("PSZ_TITLE_LOGORECT"))
+            if (const char* o = SettingRaw("PSZ_TITLE_LOGORECT"))
                 std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h);
             if (w > 0 && h > 0 && x >= 0 && y >= 0 && x + w <= 256 && y + h <= 192)
             {
@@ -730,7 +799,7 @@ Frame Update(NDS* nds)
             {
                 const RectDef& d = MenuRects[i];
                 Element e { d.x, d.y, d.w, d.h, d.corner };
-                if (const char* o = std::getenv(d.env))
+                if (const char* o = SettingRaw(d.env))
                 {
                     int x, y, w, h;
                     if (std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h) == 4)
@@ -812,7 +881,7 @@ Frame Update(NDS* nds)
         // kion asked for it a few pixels down and further right once the frame
         // came off. PSZ_PAL_MARGIN="x,y" in DS pixels retunes it.
         int mx = 0, my = 0;
-        if (const char* o = std::getenv("PSZ_PAL_MARGIN")) std::sscanf(o, "%d,%d", &mx, &my);
+        if (const char* o = SettingRaw("PSZ_PAL_MARGIN")) std::sscanf(o, "%d,%d", &mx, &my);
         const float fx = 1.0f - (mx / 256.0f) - fw;
         const float fy = 1.0f - (my / 192.0f) - fh;
         f.palette = true;
@@ -835,7 +904,7 @@ Frame Update(NDS* nds)
     {
         const RectDef& d = Rects[i];
         Element e { d.x, d.y, d.w, d.h, d.corner };
-        if (const char* o = std::getenv(d.env))
+        if (const char* o = SettingRaw(d.env))
         {
             int x, y, w, h;
             if (std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h) == 4)
@@ -895,7 +964,7 @@ static void Blit(u32* dst, const u32* src, int sx, int sy, int sw, int sh,
 float HudScale()
 {
     static const float s = [] {
-        const char* v = getenv("PSZ_HUD_ELEMENT_SCALE");
+        const char* v = SettingRaw("PSZ_HUD_ELEMENT_SCALE");
         if (!v) return 1.0f;
         float f = (float)atof(v);
         return (f > 0.05f && f < 8.0f) ? f : 1.0f;
