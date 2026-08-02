@@ -768,47 +768,54 @@ Frame Update(NDS* nds)
     default:                      overlaySays = -1; break;
     }
 
-    // STICKY. Only a RECOGNISED overlay may change the decision; an
-    // unrecognised one keeps whatever is already showing.
+    // ONE HELD OVERLAY ID, for both decisions.
     //
-    // This is what kills the transition flash for good. Loading a room or
-    // returning from a cutscene leaves the slot unrecognisable for as long as
-    // the load takes -- far longer than any debounce worth having, which is why
-    // 24 frames did not help. Holding the previous mode costs nothing, because
-    // every mode that matters IS recognised: ov04 gameplay, ov12 shops and
-    // counters, ov00/11/14/16/17 the rest.
+    // There were two: `decided` chose gameplay-versus-modal from the latest
+    // recognised overlay, and a separate held id chose WHICH screen the modal
+    // showed. They could disagree, and that is an oscillation, not a late
+    // switch -- which is exactly what kion described leaving mode select: the
+    // HUD on a white screen, then the bottom screen, then gameplay. Three
+    // attempts at this treated it as timing; it was two sources of truth.
     //
-    // The player pointer only seeds the very first decision, before any overlay
-    // has been recognised.
-    // And HELD, the same way the start menu is. Sticky alone was not enough:
-    // talking to an NPC or crossing a room boundary puts a different mode in
-    // the slot for a handful of frames, and acting on it instantly is what
-    // still flashed the bottom screen. The game cross-fades through those
-    // moments, so a mode has to persist before it is believed -- then the
-    // switch lands inside the fade instead of ahead of it.
-    static int decided = -1, pendingMode = -1, modeHold = 0;
-    if (overlaySays >= 0)
+    // Now: one id, changed only when a DIFFERENT recognised overlay has
+    // persisted for ModeHold frames. Unrecognised ids never change it, so a
+    // room load holds whatever was showing.
+    static int heldOv = -1, pendingOv = -1, modeHold = 0;
+    if (gameplayOv >= 0)
     {
-        if (overlaySays == decided)
+        if (gameplayOv == heldOv)
         {
-            pendingMode = decided;          // settled; cancel any pending switch
+            pendingOv = heldOv;
+        }
+        else if (heldOv < 0)
+        {
+            heldOv = pendingOv = gameplayOv;          // first sighting, no wait
         }
         else
         {
-            if (overlaySays != pendingMode) { pendingMode = overlaySays; modeHold = ModeHold(); }
-            if (--modeHold <= 0) decided = overlaySays;
+            if (gameplayOv != pendingOv) { pendingOv = gameplayOv; modeHold = ModeHold(); }
+            if (--modeHold <= 0) heldOv = gameplayOv;
         }
     }
-    else if (decided < 0) decided = inGame ? 1 : 0;
-    const bool gameplayMode = (decided == 1);
+
+    const bool gameplayMode = (heldOv < 0) ? inGame : (heldOv == 4);
+
+    if (EnvSet("PSZ_OV_DEBUG"))
+    {
+        static int lastLogged = -2;
+        if (heldOv != lastLogged)
+        {
+            lastLogged = heldOv;
+            PszLog("overlay -> %d (raw %d, gameplay=%d)", heldOv, gameplayOv,
+                   gameplayMode ? 1 : 0);
+        }
+    }
 
     if (!gameplayMode || menuShown)
     {
         // Hold the last known overlay across the DMA transient, so a mode never
         // flickers while it is being swapped in.
-        static int lastOverlay = -1;
-        const int ov = ResidentOverlay(nds);
-        if (ov >= 0) lastOverlay = ov;
+        const int lastOverlay = heldOv;
 
         // BOOT vs CUTSCENE, without settling what ov16/ov17 are called.
         //
@@ -829,22 +836,9 @@ Frame Update(NDS* nds)
         if (lastOverlay == 0) seenTitle = true;
         const bool booting = !seenTitle;
 
-        // TRANSITION HOLD. The game cross-fades between modes over several
-        // frames. Switching presentation the instant the overlay changes
-        // uncovered the raw bottom screen for a few frames BEFORE the fade
-        // reached white. Holding the outgoing mode briefly lets the fade cover
-        // the switch.
-        //
-        // shown   what is being presented
-        // pending what the game has actually moved to
-        static int shown = -1, pending = -1, hold = 0;
-        if (lastOverlay != shown)
-        {
-            if (lastOverlay != pending) { pending = lastOverlay; hold = TransitionHold(); }
-            if (hold > 0) hold--;
-            if (hold <= 0) shown = pending;
-        }
-        const int effectiveOverlay = shown >= 0 ? shown : lastOverlay;
+        // The held id above already absorbs the cross-fade, so there is no
+        // second latch here -- having one was the bug.
+        const int effectiveOverlay = lastOverlay;
 
         // Cutscene, dialogue, character create, ending: the top screen is the
         // content. Draw nothing and let it through untouched.
@@ -865,7 +859,7 @@ Frame Update(NDS* nds)
         // happens, so the ramp runs down across it -- the logo leaves with the
         // scene instead of surviving it.
         static int titleFrames = 0;
-        const bool leavingTitle = (pendingMode != decided);
+        const bool leavingTitle = (pendingOv != heldOv);
         if (leavingTitle) titleFrames -= 2;          // out faster than in
         else if (titleFrames < LogoFade()) titleFrames++;
         if (titleFrames < 0) titleFrames = 0;
