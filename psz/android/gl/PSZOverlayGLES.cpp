@@ -155,21 +155,25 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
                      e.sx / 256.0f, e.sy / 192.0f,
                      (e.sx + e.sw) / 256.0f, (e.sy + e.sh) / 192.0f);
         }
-        // Explicit-destination cuts: the palette's action icons, which land in
-        // the slots of the frame drawn by the art layer.
-        for (int i = 0; i < f.cutCount; i++)
-        {
-            const PSZMix::Frame::Cut& c = f.cuts[i];
-            PSZMix::Place p = { c.dx, c.dy, c.dw, c.dh };
-            PushQuad(verts, p, c.sx / 256.0f, c.sy / 192.0f,
-                     (c.sx + c.sw) / 256.0f, (c.sy + c.sh) / 192.0f);
-        }
     }
+    // Cuts go in their OWN batch. They land inside artwork the layer draws, so
+    // they have to be drawn AFTER it -- batched with the other clips they were
+    // painted first and the palette frame covered them, which is why the icons
+    // did not appear at all.
+    std::vector<float> cutVerts;
+    for (int i = 0; i < f.cutCount; i++)
+    {
+        const PSZMix::Frame::Cut& c = f.cuts[i];
+        PSZMix::Place p = { c.dx, c.dy, c.dw, c.dh };
+        PushQuad(cutVerts, p, c.sx / 256.0f, c.sy / 192.0f,
+                 (c.sx + c.sw) / 256.0f, (c.sy + c.sh) / 192.0f);
+    }
+
     // A frame can be art-only -- the title draws a logo over a modal that is
     // itself a clip, but the panel replaces its clip entirely. Do not bail
     // before the art layer gets a chance to draw.
     const bool haveArt = PSZMix::RenderArtLayer(gArtLayer, f);
-    if (verts.empty() && !haveArt) return;
+    if (verts.empty() && cutVerts.empty() && !haveArt) return;
 
     GLint prevFBO = 0, prevVP[4] = {0, 0, 0, 0};
     glGetIntegerv(GL_FRAMEBUFFER_BINDING, &prevFBO);
@@ -240,6 +244,15 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
         glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 1.0f);
         glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(full.size() / 4));
         glDisable(GL_BLEND);
+    }
+
+    if (!cutVerts.empty())
+    {
+        glBindTexture(GL_TEXTURE_2D, gScratch);
+        glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cutVerts.size() * sizeof(float)),
+                     cutVerts.data(), GL_STREAM_DRAW);
+        glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 0.0f);
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(cutVerts.size() / 4));
     }
 
     glBindVertexArray(0);

@@ -130,6 +130,13 @@ static bool EnvSet(const char* name)
     return v && *v && *v != '0';
 }
 
+// The big artwork HUD, off by default -- see DrawPlayerReadout.
+static bool UseArtHud()
+{
+    static const bool on = EnvSet("PSZ_HUD_ART");
+    return on;
+}
+
 static u32 Read(NDS* nds, u32 addr, int n)
 {
     u32 v = 0;
@@ -602,7 +609,11 @@ Frame Update(NDS* nds)
     if (f.panel)      // same gate as the rest of the field HUD
     {
         const float hs = HudScale();
-        const float fw = (124.0f / 256.0f) * hs;
+        // Minimal: the icons alone, no frame, at two thirds the size. "Just the
+        // squares" was kion's suggestion after seeing the framed version take
+        // up a quarter of the screen.
+        const float scale = UseArtHud() ? 1.0f : 0.62f;
+        const float fw = (124.0f / 256.0f) * hs * scale;
         const float fh = fw * (kPalArtH / kPalArtW) * (256.0f / 192.0f);
         const float fx = 1.0f - (2.0f / 256.0f) - fw;
         const float fy = 1.0f - (2.0f / 192.0f) - fh;
@@ -845,6 +856,54 @@ static void DrawTitleLogo(u32* dst)
     BlitArt(dst, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
 }
 
+// MINIMAL PLAYER READOUT -- the default.
+//
+// The artwork panel is faithful but it is 124x50, half the width of a 256px
+// screen, and on a Retroid-sized display that dominates the game rather than
+// informing it. kion's read after playing: the small subtle info text works
+// precisely BECAUSE it does not obscure anything, and the HP/map/palette are
+// all massive by comparison.
+//
+// So this draws the same five values as text and two thin bars, in about a
+// quarter of the area. PSZ_HUD_ART=1 restores the artwork panel.
+static void DrawPlayerReadout(u32* dst, const Frame& f)
+{
+    const float hs = HudScale();
+    const int x = 3, y = 3;
+    const int bw = (int)(56 * hs), bh = (int)(3 * hs);
+    const int line = kGlyphH + 1;
+
+    char buf[24];
+    std::snprintf(buf, sizeof(buf), "Lv%d", f.level);
+    DrawText(dst, buf, x, y, 0xFFFFFF);
+
+    struct Row { int cur, max; u32 rgb; };
+    const Row rows[2] = { { f.hp, f.maxHp, 0x40FF60 }, { f.pp, f.maxPp, 0x40A0FF } };
+    int ry = y + line + 2;
+    for (const Row& r : rows)
+    {
+        std::snprintf(buf, sizeof(buf), "%d/%d", r.cur, r.max);
+        DrawText(dst, buf, x, ry, 0xFFFFFF);
+        ry += line;
+
+        // Trough, then fill. The trough keeps the bar readable over a bright
+        // scene without needing a panel behind it.
+        const float frac = r.max > 0 ? (float)r.cur / (float)r.max : 0.0f;
+        const int fillw = (int)(bw * (frac < 0 ? 0 : frac > 1 ? 1 : frac));
+        for (int py = ry; py < ry + bh; py++)
+        {
+            if (py < 0 || py >= 192) continue;
+            for (int px = x; px < x + bw; px++)
+            {
+                if (px < 0 || px >= 256) continue;
+                dst[py * 256 + px] = (px - x) < fillw ? (0xFF000000u | r.rgb)
+                                                      : 0xA0101820u;
+            }
+        }
+        ry += bh + 3;
+    }
+}
+
 // The player panel, drawn from values instead of clipped from the bottom
 // screen. Layout is against hp-pp.png's own 256x120 art, scaled to the
 // destination box, so retuning the box does not need the numbers moved.
@@ -948,11 +1007,11 @@ bool RenderArtLayer(u32* out, const Frame& f)
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
     if (wantLogo)  DrawTitleLogo(out);
-    if (wantPanel) DrawPlayerPanel(out, f);
+    if (wantPanel) { if (UseArtHud()) DrawPlayerPanel(out, f); else DrawPlayerReadout(out, f); }
     if (wantInfo)  DrawInfoPanel(out, f);
     // Frame only; the icons are cuts, drawn by the frontend from the game's own
     // bottom screen -- see Frame::cuts.
-    if (wantPal)
+    if (wantPal && UseArtHud())
         BlitArt(out, kArt_palette, (int)(f.px * 256), (int)(f.py * 192),
                 (int)(f.pw * 256), (int)(f.ph * 192));
     return true;
