@@ -110,7 +110,14 @@ def emit_glyphs(f):
     for c in GLYPHS:
         cell = Image.new("L", (gw, gh), 0)
         ImageDraw.Draw(cell).text((0, -top), c, font=font, fill=255)
-        vals = list(cell.getdata())
+
+        # THRESHOLD TO BINARY. Pillow antialiases TTF rendering, and the draw
+        # path lights any non-zero pixel -- so a 12-alpha edge sample became a
+        # fully lit white pixel. That is what put stray pixels around the top
+        # of a "2", reading as a failed attempt at a curve instead of a glyph
+        # on a grid. A pixel font has no partial coverage by design; storing it
+        # with any is the bug.
+        vals = [255 if v >= 128 else 0 for v in cell.getdata()]
         f.write("    { " + ",".join(str(v) for v in vals) + " },\n")
     f.write("};\n\n")
     f.write("static constexpr int kGlyphW = %d;\n" % gw)

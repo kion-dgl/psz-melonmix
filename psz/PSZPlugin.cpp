@@ -945,8 +945,10 @@ static void DrawPlate(u32* dst, int x, int y, int w, int h)
 // quarter of the area. PSZ_HUD_ART=1 restores the artwork panel.
 static void DrawPlayerReadout(u32* dst, const Frame& f)
 {
+    // Inset from the screen edge. At x=3 the plate started at 0 and sat flush
+    // against the corner, which reads as clipped rather than placed.
     const float hs = HudScale();
-    const int x = 3, y = 3;
+    const int x = 7, y = 7;
     const int bw = (int)(56 * hs), bh = (int)(3 * hs);
     const int line = kGlyphH + 1;
 
