@@ -732,7 +732,21 @@ static void ApplyCameraStick(NDS* nds)
 // wrote and what it reads back a frame later, which answers it directly.
 static void ApplyMoveStick(NDS* nds)
 {
-    static const bool on = !EnvSet("PSZ_MOVE_OFF");
+    // OFF BY DEFAULT, because it does not do what it was written to do.
+    //
+    // The write lands -- kion sees the character face where we put it -- but
+    // movement keeps going the way the D-PAD says, so the only effect is a
+    // model facing that disagrees with travel. On a diagonal that reads as the
+    // character running up-left while looking right, which is worse than the
+    // rigid movement it was meant to fix.
+    //
+    // Two facts worth keeping from this: facing at 0x021A2170 IS writable and
+    // is NOT stomped, and movement direction is NOT derived from it. Analog
+    // movement therefore needs whatever computes the travel vector, which is
+    // psz-re melonmix-questions.md Q4.
+    //
+    // PSZ_MOVE_ON=1 re-enables it for experimenting.
+    static const bool on = EnvSet("PSZ_MOVE_ON");
     if (!on) return;
 
     const float mag = std::sqrt(gMoveX * gMoveX + gMoveY * gMoveY);
