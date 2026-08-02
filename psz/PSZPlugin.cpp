@@ -1285,15 +1285,18 @@ static int DrawText(u32* dst, const char* str, int x, int y, u32 rgb)
                     if (ty < 0 || ty >= 192 || tx < 0 || tx >= 256) continue;
                     if (gy >= 0 && gy < kGlyphH && gx >= 0 && gx < kGlyphW &&
                         g[gy * kGlyphW + gx]) continue;          // lit, not halo
-                    bool near = false;
-                    for (int oy = -1; oy <= 1 && !near; oy++)
+                    // NOT "near": windef.h defines it as a macro, and the
+                    // Windows CI build failed on it. Same class as the PSZ
+                    // namespace colliding with minwindef.h's typedef.
+                    bool adjacent = false;
+                    for (int oy = -1; oy <= 1 && !adjacent; oy++)
                         for (int ox = -1; ox <= 1; ox++)
                         {
                             const int sy = gy + oy, sx = gx + ox;
                             if (sy < 0 || sy >= kGlyphH || sx < 0 || sx >= kGlyphW) continue;
-                            if (g[sy * kGlyphW + sx]) { near = true; break; }
+                            if (g[sy * kGlyphW + sx]) { adjacent = true; break; }
                         }
-                    if (near) dst[ty * 256 + tx] = 0xFF000000u;
+                    if (adjacent) dst[ty * 256 + tx] = 0xFF000000u;
                 }
             for (int gy = 0; gy < kGlyphH; gy++)
             {
