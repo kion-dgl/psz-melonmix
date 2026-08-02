@@ -21,12 +21,32 @@
 #include "PSZCheats.h"
 #include "PSZArt.h"
 
+#ifdef __ANDROID__
+#include <android/log.h>
+#endif
+#include <cstdarg>
 #include <cstdlib>
 #include <cstdio>
 #include <cstring>
 
 namespace PSZMix
 {
+
+// Diagnostics have to reach the platform's own log: on Android nothing captures
+// stdout, so a printf here is invisible exactly where it is needed most.
+static void PszLog(const char* fmt, ...)
+{
+    char buf[256];
+    va_list ap;
+    va_start(ap, fmt);
+    std::vsnprintf(buf, sizeof(buf), fmt, ap);
+    va_end(ap);
+#ifdef __ANDROID__
+    __android_log_print(4 /*INFO*/, "psz-melonmix", "%s", buf);
+#else
+    std::fprintf(stderr, "[psz] %s\n", buf);
+#endif
+}
 
 // PLAYER STATS, for the panels we draw ourselves rather than clip.
 //
@@ -153,6 +173,19 @@ static float MapOpacity()
         return (f > 0.05f && f <= 1.0f) ? f : 0.6f;
     }();
     return a;
+}
+
+// Frames the player pointer must stay NULL before an unrecognised mode counts
+// as "not gameplay". A room change drops it briefly; a shop holds it forever.
+static int PointerDebounce()
+{
+    static const int n = [] {
+        const char* v = std::getenv("PSZ_POINTER_DEBOUNCE");
+        if (!v) return 24;
+        const int k = std::atoi(v);
+        return (k >= 0 && k <= 300) ? k : 24;
+    }();
+    return n;
 }
 
 static int TransitionHold()
@@ -496,6 +529,16 @@ static int CameraSpeed()
 // a future state puts something else there.
 static void ApplyCameraStick(NDS* nds)
 {
+    // PSZ_CAM_DEBUG=1 reports what the stick and the guard are doing, once a
+    // second, so a dead stick can be told apart from a failed vtable check
+    // without another build.
+    static const bool dbg = EnvSet("PSZ_CAM_DEBUG");
+    static int tick = 0;
+    if (dbg && ((tick++ % 60) == 0))
+        PszLog("stick=%.3f vtable=%08X (want %08X) cur=%u tgt=%u",
+               (double)gCameraStick, Read(nds, CameraObj, 4), CameraVTable,
+               Read(nds, CamCurYaw, 2), Read(nds, CamTgtYaw, 2));
+
     if (gCameraStick == 0.0f) return;
     if (Read(nds, CameraObj, 4) != CameraVTable) return;
 
@@ -561,7 +604,19 @@ Frame Update(NDS* nds)
         if (--menuHold <= 0) menuShown = menuNow;
     }
 
-    // WHICH MODE ARE WE IN -- ask the overlay, not the player pointer.
+    // WHICH MODE ARE WE IN.
+    //
+    // First attempt asked the overlay alone: gameplay iff ov04. That BROKE THE
+    // SHOPS. The item, weapon, personnel and custom shops do not put a
+    // recognised overlay in the slot -- ResidentOverlay returns no match, the
+    // held id stayed at 4, and every shop rendered as gameplay on the top
+    // screen. It also did not fix the transition flash it was meant to fix.
+    //
+    // So: the overlay decides ONLY when it recognises the mode. Otherwise fall
+    // back to the player pointer, DEBOUNCED -- which is what distinguishes the
+    // two cases that look identical in a single frame. A shop holds the pointer
+    // NULL indefinitely; a room change drops it for a moment. Waiting a few
+    // frames tells them apart, where no instantaneous test can.
     //
     // The player object is torn down and rebuilt across a room change and while
     // a save loads, so the pointer goes NULL for a few frames while the game is
@@ -578,7 +633,26 @@ Frame Update(NDS* nds)
         const int ovNow = ResidentOverlay(nds);
         if (ovNow >= 0) gameplayOv = ovNow;
     }
-    const bool gameplayMode = (gameplayOv == 4);
+
+    // -1 no opinion, 0 not gameplay, 1 gameplay.
+    int overlaySays = -1;
+    switch (gameplayOv)
+    {
+    case 4:                       overlaySays = 1; break;
+    case 0: case 6: case 11:
+    case 12: case 14: case 16:
+    case 17:                      overlaySays = 0; break;
+    default:                      overlaySays = -1; break;
+    }
+
+    // Debounced pointer, used only where the overlay has no opinion.
+    static int nullFrames = 0;
+    nullFrames = inGame ? 0 : (nullFrames < 1000 ? nullFrames + 1 : nullFrames);
+    const bool pointerSaysModal = nullFrames > PointerDebounce();
+
+    const bool gameplayMode = (overlaySays == 1) ? true
+                            : (overlaySays == 0) ? false
+                            : !pointerSaysModal;
 
     if (!gameplayMode || menuShown)
     {

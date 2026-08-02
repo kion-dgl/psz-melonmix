@@ -1,13 +1,14 @@
 diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
-index 11f81f90..730d6131 100644
+index 11f81f90..417773ac 100644
 --- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
 +++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
-@@ -1,3 +1,4 @@
+@@ -1,3 +1,5 @@
 +#include "PSZPlugin.h"
++#include <android/log.h>
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
  #include <jni.h>
-@@ -76,6 +77,15 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
+@@ -76,6 +78,21 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
  }
  
  JNIEXPORT void JNICALL
@@ -16,6 +17,12 @@ index 11f81f90..730d6131 100644
 +    // Right-stick camera control. The DS has no right stick, so this is input
 +    // the emulated machine never had -- the plugin turns it into a write of the
 +    // game's own camera target yaw.
++    // Logged so a dead stick can be told apart from a dead native call: if this
++    // never appears, the axis is not reaching Kotlin; if it appears and the
++    // camera still does not move, the problem is downstream.
++    static int n = 0;
++    if ((n++ % 30) == 0)
++        __android_log_print(4, "psz-melonmix", "JNI stick=%.3f", (double) x);
 +    PSZMix::SetCameraStick((float) x);
 +}
 +
