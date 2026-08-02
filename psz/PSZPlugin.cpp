@@ -481,7 +481,26 @@ Frame Update(NDS* nds)
         if (--menuHold <= 0) menuShown = menuNow;
     }
 
-    if (!inGame || menuShown)
+    // WHICH MODE ARE WE IN -- ask the overlay, not the player pointer.
+    //
+    // The player object is torn down and rebuilt across a room change and while
+    // a save loads, so the pointer goes NULL for a few frames while the game is
+    // still very much the main game. Gating the modal on that pointer meant
+    // every room transition flashed the whole bottom screen full-size before
+    // dropping back to gameplay.
+    //
+    // ov04 IS the main game (psz-re docs/game-state.md), and it stays resident
+    // across a room change. So the overlay decides, and the pointer is only
+    // used for the values it actually holds -- which already refuse to draw
+    // when they read back inconsistent.
+    static int gameplayOv = -1;
+    {
+        const int ovNow = ResidentOverlay(nds);
+        if (ovNow >= 0) gameplayOv = ovNow;
+    }
+    const bool gameplayMode = (gameplayOv == 4);
+
+    if (!gameplayMode || menuShown)
     {
         // Hold the last known overlay across the DMA transient, so a mode never
         // flickers while it is being swapped in.
