@@ -264,6 +264,19 @@ static int PointerDebounce()
 // Frames a NEW mode must persist before the presentation follows it. Long
 // enough to sit inside the game's cross-fade, short enough not to lag a real
 // change. PSZ_MODE_HOLD retunes it.
+// Frames the title logo takes to reach full strength. The game's own fade in
+// is unhurried, so this is too. PSZ_LOGO_FADE retunes it.
+static int LogoFade()
+{
+    static const int n = [] {
+        const char* v = SettingRaw("PSZ_LOGO_FADE");
+        if (!v) return 24;
+        const int k = std::atoi(v);
+        return (k >= 1 && k <= 240) ? k : 24;
+    }();
+    return n;
+}
+
 static int ModeHold()
 {
     static const int n = [] {
@@ -841,6 +854,23 @@ Frame Update(NDS* nds)
 
         // The title needs both screens: PRESS START is on the bottom, the logo
         // on the top. Presenting the bottom alone throws the logo away.
+        // LOGO FADE. Two problems, one ramp.
+        //
+        // IN: the game reaches the title through a white fade, and stamping the
+        // logo at full strength the instant the mode is recognised put it on a
+        // blank white screen before the artwork arrived.
+        //
+        // OUT: pressing start fades the game to white while our logo stayed
+        // solid on top of it. The mode hold is exactly the window where that
+        // happens, so the ramp runs down across it -- the logo leaves with the
+        // scene instead of surviving it.
+        static int titleFrames = 0;
+        const bool leavingTitle = (pendingMode != decided);
+        if (leavingTitle) titleFrames -= 2;          // out faster than in
+        else if (titleFrames < LogoFade()) titleFrames++;
+        if (titleFrames < 0) titleFrames = 0;
+        f.logoAlpha = (float)titleFrames / (float)LogoFade();
+
         if (!booting && effectiveOverlay >= 0 && OverlayKeepsTopSlice(effectiveOverlay))
         {
             // Estimated from a device capture of the title, not measured
@@ -1097,8 +1127,10 @@ static const u32* DecodeArt(const PSZArtImage& img)
 // the panels are not rectangles, so anything that ignores alpha drags the
 // background in around their edges.
 static void BlitArt(u32* dst, const PSZArtImage& img,
-                    int dx, int dy, int dw, int dh)
+                    int dx, int dy, int dw, int dh, float opacity = 1.0f)
 {
+    if (opacity <= 0.0f) return;
+    const u32 mul = (u32)((opacity < 1.0f ? opacity : 1.0f) * 255.0f);
     const u32* src = DecodeArt(img);
     if (!src || dw <= 0 || dh <= 0) return;
 
@@ -1112,7 +1144,8 @@ static void BlitArt(u32* dst, const PSZArtImage& img,
             const int tx = dx + x;
             if (tx < 0 || tx >= 256) continue;
             const u32 s = src[sy * img.w + (x * img.w / dw)];
-            const u32 sa = s >> 24;
+            u32 sa = s >> 24;
+            if (mul != 255) sa = (sa * mul) / 255;
             if (!sa) continue;
             if (sa == 255) { dst[ty * 256 + tx] = s; continue; }
 
@@ -1218,10 +1251,13 @@ static int DrawNumber(u32* dst, int value, int rx, int y, u32 rgb)
 // screen carried its background with it and the seam was distracting on the
 // device -- the logo is not a rectangle, so no rect was ever going to work.
 // psz-godot's logo.png, with alpha.
-static void DrawTitleLogo(u32* dst)
+static void DrawTitleLogo(u32* dst, float alpha)
 {
+    // Top-centred, and small: at 208px wide it stood 98 tall on a 192-line
+    // screen -- half the height, which is what kion measured by eye. 84x39 is
+    // about a fifth.
     const int lw = kArt_logo.w, lh = kArt_logo.h;
-    BlitArt(dst, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
+    BlitArt(dst, kArt_logo, (256 - lw) / 2, 3, lw, lh, alpha);
 }
 
 // A rounded translucent plate. Both drawn panels use it, so they match.
@@ -1388,7 +1424,7 @@ bool RenderArtLayer(u32* out, const Frame& f)
     if (!wantLogo && !wantPanel && !wantInfo && !wantPal) return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
-    if (wantLogo)  DrawTitleLogo(out);
+    if (wantLogo)  DrawTitleLogo(out, f.logoAlpha);
     if (wantPanel) { if (UseArtHud()) DrawPlayerPanel(out, f); else DrawPlayerReadout(out, f); }
     if (wantInfo)  DrawInfoPanel(out, f);
     // Frame only; the icons are cuts, drawn by the frontend from the game's own
@@ -1409,7 +1445,7 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
     {
         for (int i = 0; i < 256 * 192; i++) topFB[i] = bottomFB[i];
 
-        if (f.keepTop) DrawTitleLogo(topFB);
+        if (f.keepTop) DrawTitleLogo(topFB, f.logoAlpha);
         return;
     }
 

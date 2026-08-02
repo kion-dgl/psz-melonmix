@@ -34,7 +34,7 @@ OUT = ROOT / "psz" / "PSZArt.h"
 # grid is not drawn from art yet, and baking a 1024x1004 image to feed a
 # feature that does not exist is how a header becomes unreviewable.
 IMAGES = [
-    ("logo", "logo.png", 208),      # third field: resize width, for art drawn
+    ("logo", "logo.png", 84),       # third field: resize width, for art drawn
     ("panel", "hp-pp.png"),         # much larger than its destination
     ("map", "map.png"),
     ("palette", "palette_bg.png"),

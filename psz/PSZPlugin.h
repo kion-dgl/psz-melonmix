@@ -71,6 +71,8 @@ struct Frame
     // The title keeps its logo: these pixels of the TOP screen are drawn back
     // over the presented bottom screen, at the same place they already occupy.
     bool keepTop = false;
+    float logoAlpha = 1.0f;     // 0..1, ramped so the logo joins and leaves
+                                // with the game's own fades
     int ktx = 0, kty = 0, ktw = 0, kth = 0;
 
     // Player stats, read from RAM so the panel can be DRAWN rather than clipped.
