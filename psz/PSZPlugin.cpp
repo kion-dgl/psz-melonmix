@@ -446,6 +446,13 @@ static bool OverlayWantsBottomScreen(int ov)
                // the bottom is the sliders. The preview is the thing worth
                // seeing; our own sliders replace the bottom screen later.
         return false;
+    case 12:   // shops and counters. MEASURED, having had it backwards: with
+               // the item shop open the TOP screen carries the Buy/Sell menu
+               // and the bottom holds the shopkeeper and a "Select from the
+               // Menu" prompt. The interactive half is on top. Applies to the
+               // item, weapon, custom and personnel shops and both counters --
+               // all of them are ov12.
+        return false;
     default:
         return true;   // title, file select, counter/shop, anything unmapped
     }
@@ -714,14 +721,22 @@ Frame Update(NDS* nds)
     default:                      overlaySays = -1; break;
     }
 
-    // Debounced pointer, used only where the overlay has no opinion.
-    static int nullFrames = 0;
-    nullFrames = inGame ? 0 : (nullFrames < 1000 ? nullFrames + 1 : nullFrames);
-    const bool pointerSaysModal = nullFrames > PointerDebounce();
-
-    const bool gameplayMode = (overlaySays == 1) ? true
-                            : (overlaySays == 0) ? false
-                            : !pointerSaysModal;
+    // STICKY. Only a RECOGNISED overlay may change the decision; an
+    // unrecognised one keeps whatever is already showing.
+    //
+    // This is what kills the transition flash for good. Loading a room or
+    // returning from a cutscene leaves the slot unrecognisable for as long as
+    // the load takes -- far longer than any debounce worth having, which is why
+    // 24 frames did not help. Holding the previous mode costs nothing, because
+    // every mode that matters IS recognised: ov04 gameplay, ov12 shops and
+    // counters, ov00/11/14/16/17 the rest.
+    //
+    // The player pointer only seeds the very first decision, before any overlay
+    // has been recognised.
+    static int decided = -1;
+    if (overlaySays >= 0) decided = overlaySays;
+    else if (decided < 0) decided = inGame ? 1 : 0;
+    const bool gameplayMode = (decided == 1);
 
     if (!gameplayMode || menuShown)
     {
