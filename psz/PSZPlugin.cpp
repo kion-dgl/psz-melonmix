@@ -277,6 +277,20 @@ static int LogoFade()
     return n;
 }
 
+// Frames the player object must have been alive before the start-menu test is
+// believed. Covers the ~1.7s of control-mode-5 the game emits while handing
+// control back after a load. PSZ_MENU_ARM retunes it.
+static int MenuArmDelay()
+{
+    static const int n = [] {
+        const char* v = SettingRaw("PSZ_MENU_ARM");
+        if (!v) return 150;
+        const int k = std::atoi(v);
+        return (k >= 0 && k <= 1000) ? k : 150;
+    }();
+    return n;
+}
+
 static int ModeHold()
 {
     static const int n = [] {
@@ -718,7 +732,23 @@ Frame Update(NDS* nds)
     // than an overlay change, so the overlay-change hold below never covered
     // it. Same fade, same fix, separate latch -- and a longer one, because kion
     // measured this fade as slower than the title's.
-    const bool menuNow = inGame && Read(nds, base + 0x280, 4) == 5;
+    // CONTROL MODE 5 IS NOT ONLY THE START MENU.
+    //
+    // The device log settled this after four wrong theories. On every entry to
+    // gameplay -- starting a story, leaving a shop, crossing a room -- the
+    // player object appears and control mode reads 5 for about 1.7 SECONDS
+    // before settling. Read as "the menu is open", that presented the bottom
+    // screen, which is the flash. Every hold tried against it was 12 to 24
+    // frames against a ~100 frame transient, which is why tuning them changed
+    // nothing.
+    //
+    // So the menu test is disarmed until the player object has been alive for
+    // a while. A real menu cannot be opened in that window anyway -- the game
+    // is still handing control back.
+    static int aliveFrames = 0;
+    aliveFrames = inGame ? (aliveFrames < 100000 ? aliveFrames + 1 : aliveFrames) : 0;
+    const bool menuArmed = aliveFrames > MenuArmDelay();
+    const bool menuNow = menuArmed && Read(nds, base + 0x280, 4) == 5;
     static bool menuShown = false;
     static int menuHold = 0;
     if (menuNow != menuShown)
@@ -821,7 +851,7 @@ Frame Update(NDS* nds)
     {
         static int lastLogged = -2;
         static int lastMenu = -1;
-        const int menuNowDbg = (inGame && Read(nds, base + 0x280, 4) == 5) ? 1 : 0;
+        const int menuNowDbg = menuNow ? 1 : 0;
         if (heldOv != lastLogged || menuNowDbg != lastMenu)
         {
             lastLogged = heldOv;
