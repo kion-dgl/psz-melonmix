@@ -43,6 +43,34 @@ static constexpr u32 CurPpAddr   = 0x021A2200;
 static constexpr u32 MaxHpAddr   = 0x021A210C;
 static constexpr u32 MaxPpAddr   = 0x021A210E;
 
+// The contextual info box's text, UTF-16LE and NUL-terminated. Confirmed
+// against eight savestates: enemy names when targeting, item names when
+// standing on one. See psz-re docs/melonmix-questions.md Q1.
+//
+// NOTE it is STALE-RETAINING -- it keeps the last string written, so it says
+// what WOULD be shown, not whether anything is. The visibility signal is still
+// unknown, which is why the panel currently always draws.
+static constexpr u32 InfoTextAddr = 0x0211CCD0;
+
+// ACTION PALETTE ICON CELLS.
+//
+// Measured, both sides. On the game's bottom screen the three action icons are
+// 28x28 cells at these positions; in psz-godot's palette_bg.png (128x67) the
+// slots are 28x28 at (13,14), (77,14) and (45,28). Same size, same relative
+// layout -- green upper-left, red upper-right, purple lower-centre -- because
+// both come from the same original panel.
+//
+// So the icons can be CUT from the running game and dropped into our own frame,
+// which means the palette needs no knowledge of what is mapped to each slot.
+struct IconCell { int sx, sy; float ax, ay; };   // game coords; art coords
+static const IconCell kPaletteIcons[] = {
+    { 141, 16, 13.0f, 14.0f },
+    { 205, 16, 77.0f, 14.0f },
+    { 173, 30, 45.0f, 28.0f },
+};
+static constexpr int kIconSize = 28;
+static constexpr float kPalArtW = 128.0f, kPalArtH = 67.0f;
+
 static constexpr u32 PlayerPtr = 0x02108D04;
 static constexpr u32 RoomRoot  = 0x02108C64;
 static constexpr u32 AspectVal = 0x020346E0;
@@ -413,7 +441,20 @@ Frame Update(NDS* nds)
     u32 base = Read(nds, PlayerPtr, 4);
     bool inGame = InMainRAM(nds, base) && base != 0;
 
-    if (!inGame || Read(nds, base + 0x280, 4) == 5)
+    // THE START MENU HAS ITS OWN TRANSITION. It opens on control mode 5 rather
+    // than an overlay change, so the overlay-change hold below never covered
+    // it. Same fade, same fix, separate latch -- and a longer one, because kion
+    // measured this fade as slower than the title's.
+    const bool menuNow = inGame && Read(nds, base + 0x280, 4) == 5;
+    static bool menuShown = false;
+    static int menuHold = 0;
+    if (menuNow != menuShown)
+    {
+        if (menuHold <= 0) menuHold = TransitionHold() + 6;
+        if (--menuHold <= 0) menuShown = menuNow;
+    }
+
+    if (!inGame || menuShown)
     {
         // Hold the last known overlay across the DMA transient, so a mode never
         // flickers while it is being swapped in.
@@ -546,6 +587,39 @@ Frame Update(NDS* nds)
     // own answer through SetBoxHasTextHint(). Absent a hint, the box shows --
     // failing toward visible, since a missing prompt is worse than a spare one.
     const u32* bottomFB = BottomFramebuffer(nds->GPU, 0);
+
+    // Fold the UTF-16 box text to ASCII. Anything outside our glyph set becomes
+    // a space rather than a wrong character.
+    for (int i = 0; i < (int)sizeof(f.info) - 1; i++)
+    {
+        const u32 c = Read(nds, InfoTextAddr + i * 2, 2);
+        if (!c) { f.info[i] = 0; break; }
+        f.info[i] = (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
+        f.info[i + 1] = 0;
+    }
+
+    // The action palette: our frame, the game's icons.
+    if (f.panel)      // same gate as the rest of the field HUD
+    {
+        const float hs = HudScale();
+        const float fw = (124.0f / 256.0f) * hs;
+        const float fh = fw * (kPalArtH / kPalArtW) * (256.0f / 192.0f);
+        const float fx = 1.0f - (2.0f / 256.0f) - fw;
+        const float fy = 1.0f - (2.0f / 192.0f) - fh;
+        f.palette = true;
+        f.px = fx; f.py = fy; f.pw = fw; f.ph = fh;
+
+        for (const IconCell& c : kPaletteIcons)
+        {
+            if (f.cutCount >= 8) break;
+            Frame::Cut& cut = f.cuts[f.cutCount++];
+            cut.sx = c.sx; cut.sy = c.sy; cut.sw = kIconSize; cut.sh = kIconSize;
+            cut.dx = fx + (c.ax / kPalArtW) * fw;
+            cut.dy = fy + (c.ay / kPalArtH) * fh;
+            cut.dw = (kIconSize / kPalArtW) * fw;
+            cut.dh = (kIconSize / kPalArtH) * fh;
+        }
+    }
 
     for (int i = 0; i < NumRects; i++)
     {
@@ -703,7 +777,34 @@ static void BlitArt(u32* dst, const PSZArtImage& img,
     }
 }
 
-// Digits, right-aligned at (rx, y). Ours, not the game's -- see PSZArt.h.
+// Text, left-aligned at (x, y). Ours, not the game's -- see PSZArt.h.
+static int DrawText(u32* dst, const char* str, int x, int y, u32 rgb)
+{
+    const int x0 = x;
+    for (const char* c = str; *c; c++)
+    {
+        const char* p = std::strchr(kGlyphChars, *c);
+        if (p)
+        {
+            const unsigned char* g = kGlyphs[p - kGlyphChars];
+            for (int gy = 0; gy < kGlyphH; gy++)
+            {
+                const int ty = y + gy;
+                if (ty < 0 || ty >= 192) continue;
+                for (int gx = 0; gx < kGlyphW; gx++)
+                {
+                    const int tx = x + gx;
+                    if (tx < 0 || tx >= 256 || !g[gy * kGlyphW + gx]) continue;
+                    dst[ty * 256 + tx] = 0xFF000000u | rgb;
+                }
+            }
+        }
+        x += kGlyphW;
+    }
+    return x - x0;
+}
+
+// Digits, right-aligned at (rx, y).
 static int DrawNumber(u32* dst, int value, int rx, int y, u32 rgb)
 {
     char buf[12];
@@ -797,17 +898,63 @@ static void DrawPlayerPanel(u32* dst, const Frame& f)
     DrawNumber(dst, f.level, dx + (int)(0.52f * dw), dy + (int)(0.16f * dh), 0x000000);
 }
 
+// The contextual info box, DRAWN: our own panel and the game's own words set in
+// our font, rather than a rectangle clipped out of the bottom screen.
+//
+// There is no artwork for this one -- psz-godot has nothing matching the target
+// box -- so the panel is drawn in code: a soft dark plate that reads over any
+// scene without competing with it.
+static void DrawInfoPanel(u32* dst, const Frame& f)
+{
+    if (!f.info[0]) return;
+
+    // Size the plate to the text. A fixed slab looks like a UI element that
+    // failed to fill; a plate that hugs the words reads as a label.
+    const float hs = HudScale();
+    int chars = 0;
+    for (const char* c = f.info; *c; c++) chars++;
+    const int pad = (int)(4 * hs);
+    const int w = chars * kGlyphW + pad * 2;
+    const int h = kGlyphH + pad * 2;
+    const int x = 2, y = 192 - 2 - h;
+    if (w <= 0 || w > 256) return;
+
+    for (int py = y; py < y + h; py++)
+    {
+        if (py < 0 || py >= 192) continue;
+        for (int px = x; px < x + w; px++)
+        {
+            if (px < 0 || px >= 256) continue;
+            // Rounded corners: skip the four 2px corner notches.
+            const int ex = (px - x < 2) ? 2 - (px - x) : (px - (x + w - 1) > -2 ? 2 + (px - (x + w - 1)) : 0);
+            const int ey = (py - y < 2) ? 2 - (py - y) : (py - (y + h - 1) > -2 ? 2 + (py - (y + h - 1)) : 0);
+            if (ex && ey && ex + ey > 2) continue;
+            dst[py * 256 + px] = 0xD0101820u;      // ~82% opaque near-black
+        }
+    }
+
+    DrawText(dst, f.info, x + pad, y + pad, 0xFFFFFF);
+}
+
 bool RenderArtLayer(u32* out, const Frame& f)
 {
     if (!out || !f.active) return false;
 
     const bool wantLogo  = f.modal && f.keepTop;
     const bool wantPanel = !f.modal && f.panel;
-    if (!wantLogo && !wantPanel) return false;
+    const bool wantInfo  = !f.modal && f.info[0];
+    const bool wantPal   = !f.modal && f.palette;
+    if (!wantLogo && !wantPanel && !wantInfo && !wantPal) return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
     if (wantLogo)  DrawTitleLogo(out);
     if (wantPanel) DrawPlayerPanel(out, f);
+    if (wantInfo)  DrawInfoPanel(out, f);
+    // Frame only; the icons are cuts, drawn by the frontend from the game's own
+    // bottom screen -- see Frame::cuts.
+    if (wantPal)
+        BlitArt(out, kArt_palette, (int)(f.px * 256), (int)(f.py * 192),
+                (int)(f.pw * 256), (int)(f.ph * 192));
     return true;
 }
 
@@ -833,7 +980,9 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
     for (int i = 0; i < f.count; i++)
     {
         const Element& e = f.elems[i];
-        if (f.panel && e.corner == Corner_TopLeft) continue;   // drawn instead
+        if (f.panel && e.corner == Corner_TopLeft) continue;      // drawn instead
+        if (f.info[0] && e.corner == Corner_BottomLeft) continue; // drawn instead
+        if (f.palette && e.corner == Corner_BottomRight) continue; // frame+cuts
         const Place p = PlaceElement(e, hs);
         const int dx = (int)(p.x * 256.0f + 0.5f), dy = (int)(p.y * 192.0f + 0.5f);
         const int dw = (int)(p.w * 256.0f + 0.5f), dh = (int)(p.h * 192.0f + 0.5f);

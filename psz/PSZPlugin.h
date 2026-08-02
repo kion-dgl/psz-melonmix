@@ -78,6 +78,26 @@ struct Frame
     bool panel = false;
     int hp = 0, maxHp = 0, pp = 0, maxPp = 0, level = 0;
 
+    // CUTS: a source rect on the bottom screen with an EXPLICIT destination,
+    // as a fraction of the top screen. Elements anchor to a corner; these do
+    // not, because they land inside artwork we draw -- the palette's three
+    // action icons sit in the slots of our own frame.
+    //
+    // They stay cuts rather than becoming art because WHICH action is in a slot
+    // is still unknown (psz-re melonmix-questions.md Q2). Cutting the icon
+    // sidesteps that entirely: the game already drew the right one.
+    struct Cut { int sx, sy, sw, sh; float dx, dy, dw, dh; };
+    Cut cuts[8];
+    int cutCount = 0;
+
+    // Where the palette frame art goes, as fractions of the top screen.
+    bool palette = false;
+    float px = 0, py = 0, pw = 0, ph = 0;
+
+    // The contextual info box's own text, read from the game's UTF-16 buffer
+    // and folded to ASCII so we can render it in our font. Empty when unknown.
+    char info[48] = {0};
+
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
     Room rooms[MaxRooms];

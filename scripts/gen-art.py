@@ -43,7 +43,12 @@ IMAGES = [
 # Silkscreen at 8px gives 5px-tall digits, which is right for DS scale -- the
 # whole player panel is 50px tall. The glyphs are alpha only; the draw path
 # tints them, so one set covers white numerals and any colour later.
-GLYPHS = "0123456789/"
+# Full printable ASCII, not just digits: the info panel renders the game's own
+# contextual text ("Vulkure", "18 Meseta", "Container") out of the UTF-16 buffer
+# at 0x0211CCD0, so it needs letters, space and punctuation.
+GLYPHS = ("ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+          "abcdefghijklmnopqrstuvwxyz"
+          "0123456789 .,:;!?'\"()[]-+*/%#&@")
 FONT_PX = 8
 
 
@@ -106,7 +111,8 @@ def emit_glyphs(f):
     f.write("};\n\n")
     f.write("static constexpr int kGlyphW = %d;\n" % gw)
     f.write("static constexpr int kGlyphH = %d;\n" % gh)
-    f.write('static constexpr const char* kGlyphChars = "%s";\n\n' % GLYPHS)
+    esc = GLYPHS.replace("\\", "\\\\").replace('"', '\\"')
+    f.write('static constexpr const char* kGlyphChars = "%s";\n\n' % esc)
     return len(GLYPHS) * gw * gh
 
 

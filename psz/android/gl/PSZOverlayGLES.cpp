@@ -149,9 +149,20 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
             // otherwise show through underneath it. Composite() skips it the
             // same way.
             if (f.panel && e.corner == PSZMix::Corner_TopLeft) continue;
+            if (f.info[0] && e.corner == PSZMix::Corner_BottomLeft) continue;
+            if (f.palette && e.corner == PSZMix::Corner_BottomRight) continue;
             PushQuad(verts, PSZMix::PlaceElement(e, hs),
                      e.sx / 256.0f, e.sy / 192.0f,
                      (e.sx + e.sw) / 256.0f, (e.sy + e.sh) / 192.0f);
+        }
+        // Explicit-destination cuts: the palette's action icons, which land in
+        // the slots of the frame drawn by the art layer.
+        for (int i = 0; i < f.cutCount; i++)
+        {
+            const PSZMix::Frame::Cut& c = f.cuts[i];
+            PSZMix::Place p = { c.dx, c.dy, c.dw, c.dh };
+            PushQuad(verts, p, c.sx / 256.0f, c.sy / 192.0f,
+                     (c.sx + c.sw) / 256.0f, (c.sy + c.sh) / 192.0f);
         }
     }
     // A frame can be art-only -- the title draws a logo over a modal that is
