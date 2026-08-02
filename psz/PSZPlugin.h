@@ -165,6 +165,12 @@ void SetBoxHasTextHint(bool hasText);
 // writing the game's own target yaw.
 void SetCameraStick(float x);
 
+// Left-stick direction, -1..1 each. The DS has no analog stick, so the
+// frontend maps this onto d-pad bits and the game only ever sees 4 or 8
+// directions. Passing the true vector lets the overlay correct the FACING the
+// game derived from those bits, which is where the resolution is lost.
+void SetMoveStick(float x, float y);
+
 // Where an element lands on the top screen, as a fraction of it. Normalised so
 // that the DS-resolution compositor, the Qt window-pixel overlay and the GL
 // texture path can all scale ONE layout definition into their own space --

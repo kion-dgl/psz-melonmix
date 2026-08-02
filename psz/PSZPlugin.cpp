@@ -24,6 +24,7 @@
 #ifdef __ANDROID__
 #include <android/log.h>
 #endif
+#include <cmath>
 #include <cstdarg>
 #include <cstdio>
 #include <cstdlib>
@@ -166,6 +167,9 @@ static constexpr u32 CameraObj    = 0x022512C0;
 static constexpr u32 CameraVTable = 0x020F99A8;
 static constexpr u32 CamCurYaw    = CameraObj + 0x82;
 static constexpr u32 CamTgtYaw    = CameraObj + 0x90;
+
+// Player facing, u16, 65536 = a full turn (psz-re data/hud_memory_map.json).
+static constexpr u32 FacingAddr   = 0x021A2170;
 
 // One plate colour for every drawn panel. The readout and the info box are the
 // same UI and looked it only by coincidence before; this makes it structural.
@@ -635,8 +639,15 @@ static bool BoxHasText(const u32* bottomFB, const Element& e)
 
 // Right-stick state, set by the frontend once per frame.
 static float gCameraStick = 0.0f;
+static float gMoveX = 0.0f, gMoveY = 0.0f;
 static bool  gCamHolding  = false;   // stick is off centre; we own the angle
 static int   gCamYaw      = 0;
+void SetMoveStick(float x, float y)
+{
+    gMoveX = (x < -1.0f) ? -1.0f : (x > 1.0f) ? 1.0f : x;
+    gMoveY = (y < -1.0f) ? -1.0f : (y > 1.0f) ? 1.0f : y;
+}
+
 void SetCameraStick(float x)
 {
     gCameraStick = (x < -1.0f) ? -1.0f : (x > 1.0f) ? 1.0f : x;
@@ -704,6 +715,58 @@ static void ApplyCameraStick(NDS* nds)
     Write(nds, CamTgtYaw, (u32)gCamYaw, 2);
 }
 
+// ANALOG MOVEMENT DIRECTION.
+//
+// PSZ has no walk -- the d-pad is pressed or it is not, so the character stands
+// or runs -- and kion is happy with that. The problem is DIRECTION: the stick
+// is mapped onto d-pad bits, so running is quantised, which makes circling an
+// enemy hard in an action game.
+//
+// Speed is therefore left alone. The d-pad mapping still supplies "run"; this
+// only corrects the heading the game derived from those bits, by writing the
+// player's facing. Movement is camera-relative in PSZ, so the stick's angle is
+// taken relative to the camera's current yaw.
+//
+// Whether the game re-derives facing from the d-pad after we write is the open
+// question, and the same one the camera had. PSZ_MOVE_DEBUG reports what we
+// wrote and what it reads back a frame later, which answers it directly.
+static void ApplyMoveStick(NDS* nds)
+{
+    static const bool on = !EnvSet("PSZ_MOVE_OFF");
+    if (!on) return;
+
+    const float mag = std::sqrt(gMoveX * gMoveX + gMoveY * gMoveY);
+    if (mag < 0.35f) return;                       // let the d-pad alone near centre
+
+    const u32 base = Read(nds, PlayerPtr, 4);
+    if (!InMainRAM(nds, base) || !base) return;
+
+    // Screen-space angle of the stick, 0 = away from the player (up).
+    const float rad = std::atan2(gMoveX, -gMoveY);
+    int ang = (int)(rad * 65536.0f / 6.28318530718f);
+
+    // Camera-relative unless told otherwise; the camera's own yaw is the frame.
+    if (!EnvSet("PSZ_MOVE_ABSOLUTE") && Read(nds, CameraObj, 4) == CameraVTable)
+        ang += (int)Read(nds, CamCurYaw, 2) + 32768;
+
+    static int offset = 0, offsetRead = 0;
+    if (!offsetRead)
+    {
+        offsetRead = 1;
+        if (const char* v = SettingRaw("PSZ_MOVE_OFFSET")) offset = std::atoi(v);
+    }
+    const u32 want = (u32)((ang + offset) & 0xFFFF);
+
+    if (EnvSet("PSZ_MOVE_DEBUG"))
+    {
+        static int t = 0;
+        if ((t++ % 30) == 0)
+            PszLog("move stick=(%.2f,%.2f) facing=%u -> %u",
+                   (double)gMoveX, (double)gMoveY, Read(nds, FacingAddr, 2), want);
+    }
+    Write(nds, FacingAddr, want, 2);
+}
+
 // The GL frontend cannot read framebuffer pixels cheaply, so it measures the
 // box itself on a throttled readback and reports the answer here. Defaults to
 // true: an unnecessary panel is a smaller failure than a missing prompt.
@@ -730,6 +793,7 @@ Frame Update(NDS* nds)
 
     ApplyCheats(nds);
     ApplyCameraStick(nds);
+    ApplyMoveStick(nds);
 
     // CAMERA PROBE. PSZ_CAM_PROBE="0xADDR,delta" writes (player facing + 180
     // degrees + delta) to ADDR every frame. Differential analysis narrowed the

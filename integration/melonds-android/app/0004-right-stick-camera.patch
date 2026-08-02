@@ -1,5 +1,5 @@
 diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
-index 11f81f90..417773ac 100644
+index 11f81f90..b561672e 100644
 --- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
 +++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
 @@ -1,3 +1,5 @@
@@ -8,10 +8,16 @@ index 11f81f90..417773ac 100644
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
  #include <jni.h>
-@@ -76,6 +78,21 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
+@@ -76,6 +78,27 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
  }
  
  JNIEXPORT void JNICALL
++Java_me_magnum_melonds_MelonEmulator_pszSetMoveStick(JNIEnv* env, jobject thiz, jfloat x, jfloat y)
++{
++    PSZMix::SetMoveStick((float) x, (float) y);
++}
++
++extern "C" JNIEXPORT void JNICALL
 +Java_me_magnum_melonds_MelonEmulator_pszSetCameraStick(JNIEnv* env, jobject thiz, jfloat x)
 +{
 +    // Right-stick camera control. The DS has no right stick, so this is input
@@ -31,21 +37,24 @@ index 11f81f90..417773ac 100644
  {
      jsize cheatCount = env->GetArrayLength(cheats);
 diff --git a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
-index 1c7857c6..44600f85 100644
+index 1c7857c6..0f4734e6 100644
 --- a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
 +++ b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
-@@ -51,6 +51,9 @@ object MelonEmulator {
+@@ -51,6 +51,12 @@ object MelonEmulator {
          screenshotBuffer: ByteBuffer,
      )
  
 +    // psz-melonmix: right-stick camera control. -1..1, 0 when centred.
 +    external fun pszSetCameraStick(x: Float)
 +
++    // psz-melonmix: left-stick vector, for analog movement direction.
++    external fun pszSetMoveStick(x: Float, y: Float)
++
      external fun setupCheats(cheats: Array<Cheat>)
  
      external fun setupAchievements(achievements: Array<RASimpleAchievement>, leaderboards: Array<RASimpleLeaderboard>, richPresenceScript: String?)
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
-index 9cc7d414..63f8aa3b 100644
+index 9cc7d414..ccc3be5d 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 @@ -10,6 +10,7 @@ import android.os.Bundle
@@ -56,7 +65,7 @@ index 9cc7d414..63f8aa3b 100644
  import android.view.MotionEvent
  import android.view.View
  import android.view.ViewGroup
-@@ -875,6 +876,20 @@ class EmulatorActivity : AppCompatActivity() {
+@@ -875,6 +876,28 @@ class EmulatorActivity : AppCompatActivity() {
      }
  
      override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -72,6 +81,14 @@ index 9cc7d414..63f8aa3b 100644
 +            var rx = event.getAxisValue(MotionEvent.AXIS_Z)
 +            if (kotlin.math.abs(rx) < 0.02f) rx = event.getAxisValue(MotionEvent.AXIS_RX)
 +            MelonEmulator.pszSetCameraStick(if (kotlin.math.abs(rx) < 0.15f) 0f else rx)
++
++            // Left stick, raw. melonDS maps it onto d-pad bits, which is where
++            // the direction resolution is lost; the plugin uses the true vector
++            // to correct the heading afterwards.
++            MelonEmulator.pszSetMoveStick(
++                event.getAxisValue(MotionEvent.AXIS_X),
++                event.getAxisValue(MotionEvent.AXIS_Y),
++            )
 +        }
 +
          if (!activeOverlays.hasActiveOverlays() && nativeInputListener.onMotionEvent(event))
