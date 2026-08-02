@@ -736,10 +736,22 @@ static void ApplyMoveStick(NDS* nds)
     if (!on) return;
 
     const float mag = std::sqrt(gMoveX * gMoveX + gMoveY * gMoveY);
-    if (mag < 0.35f) return;                       // let the d-pad alone near centre
-
     const u32 base = Read(nds, PlayerPtr, 4);
-    if (!InMainRAM(nds, base) || !base) return;
+    const bool havePlayer = InMainRAM(nds, base) && base != 0;
+
+    // Reported BEFORE either gate. The first pass logged after them, so an
+    // early return looked identical to the feature never running.
+    if (EnvSet("PSZ_MOVE_DEBUG"))
+    {
+        static int t = 0;
+        if ((t++ % 60) == 0)
+            PszLog("move in=(%.2f,%.2f) mag=%.2f player=%d keys=%04X",
+                   (double)gMoveX, (double)gMoveY, (double)mag,
+                   havePlayer ? 1 : 0, nds->KeyInput & 0xFFFF);
+    }
+
+    if (mag < 0.35f) return;                       // let the d-pad alone near centre
+    if (!havePlayer) return;
 
     // Screen-space angle of the stick, 0 = away from the player (up).
     const float rad = std::atan2(gMoveX, -gMoveY);
@@ -761,8 +773,7 @@ static void ApplyMoveStick(NDS* nds)
     {
         static int t = 0;
         if ((t++ % 30) == 0)
-            PszLog("move stick=(%.2f,%.2f) facing=%u -> %u",
-                   (double)gMoveX, (double)gMoveY, Read(nds, FacingAddr, 2), want);
+            PszLog("move WRITE facing=%u -> %u", Read(nds, FacingAddr, 2), want);
     }
     Write(nds, FacingAddr, want, 2);
 }
