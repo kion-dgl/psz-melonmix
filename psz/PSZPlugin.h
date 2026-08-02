@@ -157,6 +157,12 @@ bool RenderArtLayer(u32* out256x192, const Frame& f);
 // read the pixels itself.
 void SetBoxHasTextHint(bool hasText);
 
+// Right-stick camera control. x is -1..1; call once per frame from the
+// frontend, 0 when the stick is centred or absent. The DS has no right stick,
+// so this is input the emulated machine never had -- it steers the camera by
+// writing the game's own target yaw.
+void SetCameraStick(float x);
+
 // Where an element lands on the top screen, as a fraction of it. Normalised so
 // that the DS-resolution compositor, the Qt window-pixel overlay and the GL
 // texture path can all scale ONE layout definition into their own space --

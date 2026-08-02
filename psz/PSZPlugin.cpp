@@ -52,6 +52,28 @@ static constexpr u32 MaxPpAddr   = 0x021A210E;
 // unknown, which is why the panel currently always draws.
 static constexpr u32 InfoTextAddr = 0x0211CCD0;
 
+// THE CAMERA (psz-re melonmix-questions.md Q3, answered).
+//
+// One object, identified by its vtable, which occurs exactly once in the heap
+// of all 45 field savestates:
+//
+//   +0x00  vtable = 0x020F99A8
+//   +0x82  u16  CURRENT yaw
+//   +0x86  u16  recentre source, used as +0x8000
+//   +0x88  u32  mode
+//   +0x90  u16  TARGET yaw
+//   +0x94  u32  step cap
+//
+// WRITE THE TARGET, NOT THE CURRENT. The per-frame update lerps
+// current += (target - current) >> 3, so a written current is dragged back an
+// eighth of the way every frame -- it would read as the camera fighting the
+// stick. The target is what the game's own turn-to call writes, and nothing
+// recomputes it unconditionally, so it is not stomped.
+static constexpr u32 CameraObj    = 0x022512C0;
+static constexpr u32 CameraVTable = 0x020F99A8;
+static constexpr u32 CamCurYaw    = CameraObj + 0x82;
+static constexpr u32 CamTgtYaw    = CameraObj + 0x90;
+
 // One plate colour for every drawn panel. The readout and the info box are the
 // same UI and looked it only by coincidence before; this makes it structural.
 static constexpr u32 kPlateRGBA = 0xD0101820u;
@@ -447,6 +469,47 @@ static bool BoxHasText(const u32* bottomFB, const Element& e)
     return dark > 24;
 }
 
+// Right-stick state, set by the frontend once per frame.
+static float gCameraStick = 0.0f;
+void SetCameraStick(float x)
+{
+    gCameraStick = (x < -1.0f) ? -1.0f : (x > 1.0f) ? 1.0f : x;
+}
+
+// Degrees-ish per frame at full deflection. 0x10000 is a full turn, so 400 is
+// about 132 degrees a second at 60fps. PSZ_CAM_SPEED retunes it; negative
+// inverts.
+static int CameraSpeed()
+{
+    static const int n = [] {
+        const char* v = std::getenv("PSZ_CAM_SPEED");
+        if (!v) return 400;
+        const int k = std::atoi(v);
+        return (k >= -4000 && k <= 4000 && k != 0) ? k : 400;
+    }();
+    return n;
+}
+
+// Steer the camera from the right stick. Only ever runs in the main game, and
+// only when the object at the expected address really is the camera -- the
+// vtable check is what keeps a stray write out of an arbitrary heap object if
+// a future state puts something else there.
+static void ApplyCameraStick(NDS* nds)
+{
+    if (gCameraStick == 0.0f) return;
+    if (Read(nds, CameraObj, 4) != CameraVTable) return;
+
+    const int delta = (int)(gCameraStick * (float)CameraSpeed());
+    if (!delta) return;
+
+    // Steer from the CURRENT yaw, not the stored target. Reading the target
+    // back and adding to it accumulates the lerp's own lag into the input and
+    // the camera runs away; anchoring to where the camera actually is keeps the
+    // stick proportional.
+    const u32 cur = Read(nds, CamCurYaw, 2);
+    Write(nds, CamTgtYaw, (cur + delta) & 0xFFFF, 2);
+}
+
 // The GL frontend cannot read framebuffer pixels cheaply, so it measures the
 // box itself on a throttled readback and reports the answer here. Defaults to
 // true: an unnecessary panel is a smaller failure than a missing prompt.
@@ -460,6 +523,7 @@ Frame Update(NDS* nds)
     if (!nds || !nds->MainRAM) return f;
 
     ApplyCheats(nds);
+    ApplyCameraStick(nds);
 
     // CAMERA PROBE. PSZ_CAM_PROBE="0xADDR,delta" writes (player facing + 180
     // degrees + delta) to ADDR every frame. Differential analysis narrowed the
