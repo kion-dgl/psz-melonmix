@@ -261,6 +261,20 @@ static int PointerDebounce()
     return n;
 }
 
+// Frames a NEW mode must persist before the presentation follows it. Long
+// enough to sit inside the game's cross-fade, short enough not to lag a real
+// change. PSZ_MODE_HOLD retunes it.
+static int ModeHold()
+{
+    static const int n = [] {
+        const char* v = SettingRaw("PSZ_MODE_HOLD");
+        if (!v) return 12;
+        const int k = std::atoi(v);
+        return (k >= 0 && k <= 120) ? k : 12;
+    }();
+    return n;
+}
+
 static int TransitionHold()
 {
     static const int n = [] {
@@ -753,8 +767,25 @@ Frame Update(NDS* nds)
     //
     // The player pointer only seeds the very first decision, before any overlay
     // has been recognised.
-    static int decided = -1;
-    if (overlaySays >= 0) decided = overlaySays;
+    // And HELD, the same way the start menu is. Sticky alone was not enough:
+    // talking to an NPC or crossing a room boundary puts a different mode in
+    // the slot for a handful of frames, and acting on it instantly is what
+    // still flashed the bottom screen. The game cross-fades through those
+    // moments, so a mode has to persist before it is believed -- then the
+    // switch lands inside the fade instead of ahead of it.
+    static int decided = -1, pendingMode = -1, modeHold = 0;
+    if (overlaySays >= 0)
+    {
+        if (overlaySays == decided)
+        {
+            pendingMode = decided;          // settled; cancel any pending switch
+        }
+        else
+        {
+            if (overlaySays != pendingMode) { pendingMode = overlaySays; modeHold = ModeHold(); }
+            if (--modeHold <= 0) decided = overlaySays;
+        }
+    }
     else if (decided < 0) decided = inGame ? 1 : 0;
     const bool gameplayMode = (decided == 1);
 
