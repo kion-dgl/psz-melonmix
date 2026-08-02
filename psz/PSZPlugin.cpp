@@ -460,6 +460,22 @@ Frame Update(NDS* nds)
     if (!nds || !nds->MainRAM) return f;
 
     ApplyCheats(nds);
+
+    // CAMERA PROBE. PSZ_CAM_PROBE="0xADDR,delta" writes (player facing + 180
+    // degrees + delta) to ADDR every frame. Differential analysis narrowed the
+    // camera yaw to 63 addresses that all become facing+180 when L recentres;
+    // most are an 0x130-stride array of per-object copies, so the question is
+    // which one the renderer actually reads. Writing is the only way to tell,
+    // and writing is what the feature needs regardless.
+    if (const char* v = std::getenv("PSZ_CAM_PROBE"))
+    {
+        unsigned int addr = 0; int delta = 0;
+        if (std::sscanf(v, "%x,%d", &addr, &delta) == 2 && InMainRAM(nds, addr))
+        {
+            const u32 facing = Read(nds, 0x021A2170, 2);
+            Write(nds, addr, (facing + 32768 + delta) & 0xFFFF, 2);
+        }
+    }
     f.areaMap = ServiceAreaMapToggle(nds);
 
     // The player object pointer gates everything: it is NULL in every mode that
