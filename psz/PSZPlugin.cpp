@@ -791,6 +791,23 @@ Frame Update(NDS* nds)
         {
             heldOv = pendingOv = gameplayOv;          // first sighting, no wait
         }
+        else if (gameplayOv == 4)
+        {
+            // LEAVING a modal mode: switch AT ONCE, no hold.
+            //
+            // The hold is what produced the flash. While the held id was still
+            // 14 (mode select) or 12 (a shop) we kept presenting THE BOTTOM
+            // SCREEN -- but the game had already moved on, so what got copied
+            // was the new content underneath. That reads exactly as "the bottom
+            // screen pops up for a few frames" on starting a story, leaving a
+            // shop, or crossing a room.
+            //
+            // The hold still earns its place in the other direction, where it
+            // lands the switch inside the game's fade. It is only wrong on the
+            // way out, because a stale MODAL presentation shows the wrong
+            // pixels while a stale top-screen one shows none.
+            heldOv = pendingOv = gameplayOv;
+        }
         else
         {
             if (gameplayOv != pendingOv) { pendingOv = gameplayOv; modeHold = ModeHold(); }
@@ -803,11 +820,15 @@ Frame Update(NDS* nds)
     if (EnvSet("PSZ_OV_DEBUG"))
     {
         static int lastLogged = -2;
-        if (heldOv != lastLogged)
+        static int lastMenu = -1;
+        const int menuNowDbg = (inGame && Read(nds, base + 0x280, 4) == 5) ? 1 : 0;
+        if (heldOv != lastLogged || menuNowDbg != lastMenu)
         {
             lastLogged = heldOv;
-            PszLog("overlay -> %d (raw %d, gameplay=%d)", heldOv, gameplayOv,
-                   gameplayMode ? 1 : 0);
+            lastMenu = menuNowDbg;
+            PszLog("overlay -> %d (raw %d, gameplay=%d, inGame=%d, ctrl5=%d)",
+                   heldOv, gameplayOv, gameplayMode ? 1 : 0, inGame ? 1 : 0,
+                   menuNowDbg);
         }
     }
 
