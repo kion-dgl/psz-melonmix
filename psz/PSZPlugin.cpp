@@ -580,6 +580,8 @@ static bool BoxHasText(const u32* bottomFB, const Element& e)
 
 // Right-stick state, set by the frontend once per frame.
 static float gCameraStick = 0.0f;
+static bool  gCamHolding  = false;   // stick is off centre; we own the angle
+static int   gCamYaw      = 0;
 void SetCameraStick(float x)
 {
     gCameraStick = (x < -1.0f) ? -1.0f : (x > 1.0f) ? 1.0f : x;
@@ -615,18 +617,36 @@ static void ApplyCameraStick(NDS* nds)
                (double)gCameraStick, Read(nds, CameraObj, 4), CameraVTable,
                Read(nds, CamCurYaw, 2), Read(nds, CamTgtYaw, 2));
 
-    if (gCameraStick == 0.0f) return;
     if (Read(nds, CameraObj, 4) != CameraVTable) return;
+    if (gCameraStick == 0.0f) { gCamHolding = false; return; }
 
     const int delta = (int)(gCameraStick * (float)CameraSpeed());
     if (!delta) return;
 
-    // Steer from the CURRENT yaw, not the stored target. Reading the target
-    // back and adding to it accumulates the lerp's own lag into the input and
-    // the camera runs away; anchoring to where the camera actually is keeps the
-    // stick proportional.
-    const u32 cur = Read(nds, CamCurYaw, 2);
-    Write(nds, CamTgtYaw, (cur + delta) & 0xFFFF, 2);
+    // ACCUMULATE OUR OWN ANGLE. The first version anchored each frame's delta
+    // to the CURRENT yaw and wrote current+delta as the target. That looks
+    // right and cannot work: while the game holds the camera locked behind the
+    // player, current does not move, so current+delta is the SAME target every
+    // frame -- the camera steps once and stops. The device log showed exactly
+    // that: current pinned at 38230 for eight seconds while the target sat at
+    // 38630.
+    //
+    // So hold our own angle, seeded from the camera the moment the stick leaves
+    // centre, and advance it. Released, we stop writing entirely and the game's
+    // own follow logic takes back over.
+    if (!gCamHolding)
+    {
+        gCamHolding = true;
+        gCamYaw = (int)Read(nds, CamCurYaw, 2);
+    }
+    gCamYaw = (gCamYaw + delta) & 0xFFFF;
+
+    // Write BOTH. The target alone is not enough: the per-frame lerp that would
+    // carry current toward it is gated, which is why current stayed pinned. The
+    // target still has to be set or the game's own interpolation drags the
+    // camera straight back.
+    Write(nds, CamCurYaw, (u32)gCamYaw, 2);
+    Write(nds, CamTgtYaw, (u32)gCamYaw, 2);
 }
 
 // The GL frontend cannot read framebuffer pixels cheaply, so it measures the
