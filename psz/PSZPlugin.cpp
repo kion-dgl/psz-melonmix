@@ -107,7 +107,10 @@ static const RectDef MenuRects[] = {
 static constexpr int NumMenuRects = sizeof(MenuRects) / sizeof(MenuRects[0]);
 static const RectDef Rects[] = {
     { "PSZ_HUD_PANELRECT",   2,   4, 124, 50, Corner_TopLeft     },  // level / HP / PP
-    { "PSZ_HUD_MAPRECT",   145, 109,  68, 68, Corner_TopRight    },  // map plate, black square only
+    // Cropped to the map itself: 4px off the top, 7 off the right, 1 off the
+    // bottom of the plate bounds, measured by kion on the device. What came off
+    // was the game's own frame and the key row.
+    { "PSZ_HUD_MAPRECT",   145, 113,  61, 63, Corner_TopRight    },  // map only
     { "PSZ_HUD_TGTRECT",     2,  96, 124, 56, Corner_BottomLeft  },  // locked-on target
     { "PSZ_HUD_PALRECT",   128,   6, 124, 54, Corner_BottomRight },  // action palette
 };
