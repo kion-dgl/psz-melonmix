@@ -5,6 +5,17 @@
 #   ./scripts/bootstrap.sh desktop     -> build/melonDS
 #   ./scripts/bootstrap.sh android     -> build/melonDS-android
 #   ./scripts/bootstrap.sh all
+#   ./scripts/bootstrap.sh ensure-<t>  -> what the build scripts call
+#
+# "ensure" exists because the build scripts used to guard with
+#   [ -d "$DIR" ] || bootstrap
+# which syncs psz/ into the tree exactly once, on the very first run. Every
+# later build compiled whatever was copied in that first time: an APK was built
+# against a PSZPlugin.h four Corner values out of date, and nothing said so.
+# Always running the full bootstrap is not the fix either -- it hard-resets and
+# cleans the clone, discarding the build directory and forcing a cold rebuild
+# every time. So the cheap half (copy our sources) runs unconditionally, and the
+# destructive half only when the pins or patches actually changed.
 #
 # Idempotent: re-running resets the clone to the pinned rev first, so a failed
 # or half-applied run never leaves a tree that builds something unexpected.
@@ -61,15 +72,67 @@ apply_patches() {
     done
 }
 
-desktop() {
+# Everything a full bootstrap bakes into the tree that a source copy cannot
+# reproduce: the upstream revisions and the integration patches. A change to any
+# of these means the existing tree is wrong in a way re-copying will not fix.
+stamp_for() {
+    case "$1" in
+        desktop) cat "$ROOT/upstreams.toml" "$ROOT"/integration/melonds/*.patch ;;
+        android) cat "$ROOT/upstreams.toml" \
+                     "$ROOT"/integration/melonds-android/app/*.patch \
+                     "$ROOT"/integration/melonds-android/lib/*.patch ;;
+    esac 2>/dev/null | sha256sum | cut -d" " -f1
+}
+
+# The cheap half: our own sources into an already-prepared tree. Safe to repeat
+# because every path here is a file we add, never one a patch edits.
+sync_desktop() {
     local dir="$WORK/melonDS"
-    fetch melonds "$dir"
     # Glob rather than naming files: adding PSZOverlayGL.* broke this by being
     # copied nowhere while the patched CMakeLists referenced it, and cmake failed
     # at generate time rather than anywhere that pointed at the cause.
     cp "$ROOT"/psz/*.h "$ROOT"/psz/*.cpp "$dir/src/"
     cp "$ROOT"/psz/qt/*.h "$ROOT"/psz/qt/*.cpp "$dir/src/frontend/qt_sdl/"
+}
+
+sync_android() {
+    local dir="$WORK/melonDS-android"
+    # Glob, for the same reason the desktop path does: naming the files meant a
+    # newly added header (PSZOverlayIDs.h) was copied nowhere and the Android
+    # build failed on a missing include while the desktop one was fine.
+    cp "$ROOT"/psz/*.h "$ROOT"/psz/*.cpp "$dir/melonDS-android-lib/src/"
+    cp "$ROOT"/psz/android/gl/*.h "$ROOT"/psz/android/gl/*.cpp "$dir/app/src/main/cpp/" 2>/dev/null || true
+    # Our launcher icon and adaptive-icon config, overwriting upstream's melon.
+    # Copied rather than patched because they are binaries; a binary hunk in a
+    # patch file is unreadable and merges badly.
+    cp -r "$ROOT"/psz/android/res/. "$dir/app/src/main/res/"
+}
+
+# What the build scripts call. Full bootstrap when the tree is absent or the
+# pins/patches moved; otherwise just re-sync our sources over it.
+ensure() {
+    local target="$1" dir want have
+    case "$target" in
+        desktop) dir="$WORK/melonDS" ;;
+        android) dir="$WORK/melonDS-android" ;;
+    esac
+    want="$(stamp_for "$target")"
+    have="$(cat "$dir/.psz-bootstrap-stamp" 2>/dev/null || true)"
+    if [ ! -d "$dir/.git" ] || [ "$want" != "$have" ]; then
+        [ -d "$dir/.git" ] && echo ">> pins or patches changed -- rebuilding $target tree"
+        "$target"
+    else
+        echo ">> $target tree current; syncing psz sources"
+        "sync_$target"
+    fi
+}
+
+desktop() {
+    local dir="$WORK/melonDS"
+    fetch melonds "$dir"
+    sync_desktop
     apply_patches "$dir" "$ROOT/integration/melonds"
+    stamp_for desktop > "$dir/.psz-bootstrap-stamp"
     echo ">> desktop tree ready: $dir"
 }
 
@@ -88,15 +151,7 @@ android() {
     git -C "$lib" checkout -q "$librev"
     git -C "$lib" reset -q --hard "$librev"
     git -C "$lib" clean -qfd
-    # Glob, for the same reason the desktop path does: naming the files meant a
-    # newly added header (PSZOverlayIDs.h) was copied nowhere and the Android
-    # build failed on a missing include while the desktop one was fine.
-    cp "$ROOT"/psz/*.h "$ROOT"/psz/*.cpp "$lib/src/"
-
-    # Our launcher icon and adaptive-icon config, overwriting upstream's melon.
-    # Copied rather than patched because they are binaries; a binary hunk in a
-    # patch file is unreadable and merges badly.
-    cp -r "$ROOT"/psz/android/res/. "$dir/app/src/main/res/"
+    sync_android
 
     # The app and its core are separate repos, so patches are split by target
     # directory and applied wholesale. Naming them individually is what let the
@@ -104,6 +159,7 @@ android() {
     # me.magnum.melonds.dev, labelled "melonDS Dev", with only the icons changed.
     apply_patches "$dir" "$ROOT/integration/melonds-android/app"
     apply_patches "$lib" "$ROOT/integration/melonds-android/lib"
+    stamp_for android > "$dir/.psz-bootstrap-stamp"
     echo ">> android tree ready: $dir"
 }
 
@@ -111,5 +167,7 @@ case "${1:-all}" in
     desktop) desktop ;;
     android) android ;;
     all)     desktop; android ;;
-    *) echo "usage: bootstrap.sh [desktop|android|all]" >&2; exit 2 ;;
+    ensure-desktop) ensure desktop ;;
+    ensure-android) ensure android ;;
+    *) echo "usage: bootstrap.sh [desktop|android|all|ensure-desktop|ensure-android]" >&2; exit 2 ;;
 esac

@@ -68,6 +68,36 @@ struct Frame
     Element elems[MaxElements];
     int count = 0;
 
+    // The title keeps its logo: these pixels of the TOP screen are drawn back
+    // over the presented bottom screen, at the same place they already occupy.
+    bool keepTop = false;
+    int ktx = 0, kty = 0, ktw = 0, kth = 0;
+
+    // Player stats, read from RAM so the panel can be DRAWN rather than clipped.
+    // Valid only while inGame; panel stays false everywhere else.
+    bool panel = false;
+    int hp = 0, maxHp = 0, pp = 0, maxPp = 0, level = 0;
+
+    // CUTS: a source rect on the bottom screen with an EXPLICIT destination,
+    // as a fraction of the top screen. Elements anchor to a corner; these do
+    // not, because they land inside artwork we draw -- the palette's three
+    // action icons sit in the slots of our own frame.
+    //
+    // They stay cuts rather than becoming art because WHICH action is in a slot
+    // is still unknown (psz-re melonmix-questions.md Q2). Cutting the icon
+    // sidesteps that entirely: the game already drew the right one.
+    struct Cut { int sx, sy, sw, sh; float dx, dy, dw, dh; float alpha; };
+    Cut cuts[8];
+    int cutCount = 0;
+
+    // Where the palette frame art goes, as fractions of the top screen.
+    bool palette = false;
+    float px = 0, py = 0, pw = 0, ph = 0;
+
+    // The contextual info box's own text, read from the game's UTF-16 buffer
+    // and folded to ASCII so we can render it in our font. Empty when unknown.
+    char info[48] = {0};
+
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
     Room rooms[MaxRooms];
@@ -110,6 +140,39 @@ bool PatchEternalMultiplayer(u8* rom, u32 romlen);
 // better result drawing the same Frame itself. Both are legitimate, and this one
 // is what makes a handheld build possible today.
 void Composite(u32* topFB, const u32* bottomFB, const Frame& f);
+
+// Render everything that comes from OUR OWN art -- the title logo, the drawn
+// player panel -- into a transparent 256x192 RGBA layer. Straight alpha.
+//
+// This exists so the GL frontend does not reimplement the drawing in shaders.
+// None of it needs game pixels, so a GL path can render this once on the CPU
+// and upload it, and both renderers then produce the same image by
+// construction rather than by two implementations agreeing.
+//
+// Returns false when there is nothing to draw, so the caller can skip upload.
+bool RenderArtLayer(u32* out256x192, const Frame& f);
+
+// Tell the core whether the contextual info box currently has text in it.
+// Only needed by frontends whose frames live on the GPU, where the core cannot
+// read the pixels itself.
+void SetBoxHasTextHint(bool hasText);
+
+// Right-stick camera control. x is -1..1; call once per frame from the
+// frontend, 0 when the stick is centred or absent. The DS has no right stick,
+// so this is input the emulated machine never had -- it steers the camera by
+// writing the game's own target yaw.
+void SetCameraStick(float x);
+
+// Where an element lands on the top screen, as a fraction of it. Normalised so
+// that the DS-resolution compositor, the Qt window-pixel overlay and the GL
+// texture path can all scale ONE layout definition into their own space --
+// three hand-written copies of the same corner arithmetic is how they drift.
+struct Place { float x, y, w, h; };
+Place PlaceElement(const Element& e, float hudScale);
+
+// Element size multiplier. 1.0 is DS-native; the elements are cut at DS
+// resolution and looked oversized on a phone-sized top screen.
+float HudScale();
 
 }
 

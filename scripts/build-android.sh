@@ -16,7 +16,7 @@
 set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIR="${PSZ_WORK:-$ROOT/build}/melonDS-android"
-[ -d "$DIR" ] || "$ROOT/scripts/bootstrap.sh" android
+"$ROOT/scripts/bootstrap.sh" ensure-android
 : "${ANDROID_HOME:?set ANDROID_HOME to your Android SDK}"
 
 PROPS="$DIR/local.properties"

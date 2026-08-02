@@ -227,6 +227,13 @@ room table; exits are stubs, and keyed or enemy-gated exits are drawn red.</p>
 <p>From testing on a Retroid Pocket. This supersedes the earlier
 "cutscene/dialogue/title all show the top screen" rule — the title in particular
 reverses.</p>
+<p><strong>This table is most of the product.</strong> Only a handful of screens
+genuinely use both displays; for the rest, showing the right one at the right
+time <em>is</em> the single-screen experience, and it needs no memory layout at
+all — just the overlay id. The HUD drawing below is the smaller remainder.</p>
+<p>Ids come from psz-re <code>docs/game-state.md</code>, which names eight of the
+nineteen slot overlays. Two screens in this table have no id of their own, and
+that is the open problem rather than an omission.</p>
 <div class="scroll">
 <table>
   <tr><th>Screen</th><th>Present</th><th>Notes</th><th>State</th></tr>
@@ -235,13 +242,23 @@ reverses.</p>
   <tr><td>Start menu</td><td>bottom, full</td><td><strong>Works well as-is.</strong> The PSO-style
       recomposition is <em>dropped</em>: a full bottom screen turned out better than
       spreading panels around the scene.</td><td><span class="tag ok">correct</span></td></tr>
-  <tr><td>Title</td><td><strong>bottom</strong></td><td>with the logo sprite from the
-      <em>top</em> screen drawn onto it — a composite, not a swap</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Select character</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Select mode</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Create character</td><td><strong>top</strong></td><td>needs <em>custom sliders</em> drawn by us,
-      not a blit of the game's panel</td><td><span class="tag gap">to do</span></td></tr>
-  <tr><td>Name entry</td><td>bottom</td><td>—</td><td><span class="tag gap">to do</span></td></tr>
+  <tr><td>Title <code>ov00</code></td><td><strong>bottom</strong></td><td>with the logo kept from the
+      <em>top</em> screen — a composite, not a swap. The slice is clipped from the
+      running game (<code>PSZ_TITLE_LOGORECT</code>); psz-godot's
+      <code>images/logo.png</code> is the eventual upgrade, once anything here can
+      decode a PNG.</td><td><span class="tag ok">implemented</span></td></tr>
+  <tr><td>Select character <code>ov14</code></td><td>bottom</td><td>psz-re calls this
+      "file select"</td><td><span class="tag ok">implemented</span></td></tr>
+  <tr><td>Select mode</td><td>bottom</td><td><strong>No overlay id.</strong> Not a mode of its own —
+      presumed a sub-state of file select, so it inherits that policy and needs no
+      work unless it turns out to differ.</td><td><span class="tag gap">unidentified</span></td></tr>
+  <tr><td>Create character <code>ov11</code></td><td><strong>top</strong></td><td>top is the character
+      preview, bottom the sliders. Presenting the preview is done; <em>custom sliders
+      down the left</em> are not.</td><td><span class="tag ok">screen only</span></td></tr>
+  <tr><td>Name entry</td><td>bottom</td><td><strong>No overlay id.</strong> Presumed a sub-state of
+      character create — which is the one case where inheriting is WRONG, since
+      create shows the top screen and name entry wants the bottom. Needs a
+      sub-state signal.</td><td><span class="tag gap">unidentified</span></td></tr>
 </table>
 </div>
 
@@ -254,6 +271,13 @@ whatever melonDS-android's own layout does rather than our policy.</p>
 <p>It cannot be fixed by moving the call — in the accelerated path the frame
 lives in a GL texture and <code>Composite()</code> needs CPU framebuffers.
 Android needs a real drawing path, the same shape as the Qt one.</p>
+<p><strong>Implemented, not yet confirmed on device.</strong>
+<code>PSZOverlayGLES</code> draws the same <code>Frame</code> into the frame
+texture, so the accelerated branch no longer does nothing. The texture holds
+both screens stacked, and sampling a texture while rendering into it is
+undefined, so it copies the bottom screen to a scratch texture first — one
+copy per frame, and only on frames that draw. This is written and it compiles;
+nobody has seen it run. It stays tagged as a bug until a device confirms it.</p>
 
 <h2 id="hud-art">HUD elements: rects are the wrong primitive <span class="tag gap">direction change</span></h2>
 <p>Two problems with copying rectangles out of the bottom screen, both reported
@@ -269,6 +293,31 @@ from the device:</p>
 scene, fed by values already read from RAM — plus a size control. Both need a
 drawing path that can scale and blend, which is the same missing piece as the
 OpenGL bug above.</p>
+<p><strong>Size control: <code>PSZ_HUD_ELEMENT_SCALE</code></strong>, 1.0 being
+DS-native. Elements are now sized as a fraction of the top screen rather than a
+fixed pixel multiple, so they no longer grow relative to the scene as output
+resolution rises.</p>
+<p><strong>Artwork is not committed here, deliberately.</strong> The PNGs exist
+in psz-godot, cut from the game's own sprites — and <code>git ls-files</code>
+shows they are not tracked there either, even though that repo is public. They
+ship through its asset pack instead. Committing PSZ-derived art into this
+public GPLv3 repo would break a rule the project already follows everywhere
+else: no ROM, no game assets, no savestates. So the loader reads them from a
+gitignored directory and a script populates it from a local psz-godot checkout.
+<em>How release builds get the artwork is an open decision, not an oversight.</em></p>
+
+<h2 id="android-layout">Android: no layout configuration <span class="tag ok">specified</span></h2>
+<p>A fresh install MUST open top-screen-only, centred, filling the display. No
+layout editing, and no bottom window to try to remove.</p>
+<p>Previously the default layout placed both screens, so reaching the only
+state this build supports meant hand-building a layout — and the bottom window
+could not be deleted from it at all. <code>buildSingleScreenLayout()</code>
+already existed upstream but was reachable only on dual-display devices; the
+single-display path now uses it too.</p>
+<p><strong>Known cost:</strong> that layout carries no soft input buttons, so a
+touch-only device loses on-screen controls. Handhelds with physical controls —
+what this build targets — are unaffected. <code>-Dpsz.dualScreen=true</code>
+restores the old behaviour.</p>
 
 <h2 id="bugs">Earlier reported bugs <span class="tag ok">all fixed</span></h2>
 

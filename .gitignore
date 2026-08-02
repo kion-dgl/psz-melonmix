@@ -14,3 +14,7 @@ sandbox*/
 
 dist/
 .DS_Store
+
+# psz/art/ IS tracked. kion's call: a few PNGs is fair use, and keeping them
+# out was incidental -- he was avoiding committing anything under assets/, not
+# holding these back. scripts/fetch-hud-art.sh still refreshes them.

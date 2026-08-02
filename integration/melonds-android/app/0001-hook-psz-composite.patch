@@ -1,16 +1,75 @@
+diff --git a/app/CMakeLists.txt b/app/CMakeLists.txt
+index 2ec2ba88..c94e76cc 100644
+--- a/app/CMakeLists.txt
++++ b/app/CMakeLists.txt
+@@ -2,6 +2,19 @@ cmake_minimum_required(VERSION 3.4.1)
+ 
+ project(melonDS-android-frontend)
+ 
++# psz-melonmix: optimise native code even in the debug variant.
++#
++# The APKs we hand kion to test are assembleGitHubProdDebug, and AGP compiles
++# native code at -O0 for a debuggable variant. A DS emulator at -O0 is roughly
++# half speed -- which is exactly what he reported: PSZ running at half rate on
++# the Retroid while stock melonDS ran it fine. The overlay was not the cause.
++#
++# COMPILE_OPTIONS land after CMAKE_CXX_FLAGS_DEBUG, so this -O2 wins over the
++# -O0 AGP puts there, without giving up the debug signing that lets the build
++# install over itself.
++add_compile_options(-O2)
++
++
+ add_compile_definitions(MELONDS_GL_HEADER=<GLES3/gl32.h>)
+ add_compile_definitions(EGL_EGLEXT_PROTOTYPES)
+ 
+@@ -42,6 +55,7 @@ add_library(
+         ${ANDROID-CPP}/MelonDSAudio.cpp
+         ${ANDROID-CPP}/MelonDSNandJNI.cpp
+         ${ANDROID-CPP}/MelonInstance.cpp
++        ${ANDROID-CPP}/PSZOverlayGLES.cpp
+         ${ANDROID-CPP}/MicInputOboeCallback.cpp
+         ${ANDROID-CPP}/NativeGlContext.cpp
+         ${ANDROID-CPP}/OboeCallback.cpp
 diff --git a/app/src/main/cpp/MelonInstance.cpp b/app/src/main/cpp/MelonInstance.cpp
-index 8fdc5c4..6913477 100644
+index 8fdc5c42..a4a15251 100644
 --- a/app/src/main/cpp/MelonInstance.cpp
 +++ b/app/src/main/cpp/MelonInstance.cpp
-@@ -8,6 +8,7 @@
+@@ -8,6 +8,8 @@
  #include "GPU3D_Compute.h"
  #include "Configuration.h"
  #include "DSi.h"
 +#include "PSZPlugin.h"
++#include "PSZOverlayGLES.h"
  #include "DSiSupport.h"
  #include "DSi_I2C.h"
  #include "GPU3D_OpenGL.h"
-@@ -352,6 +353,14 @@ u32 MelonInstance::runFrame()
+@@ -287,21 +289,23 @@ u32 MelonInstance::runFrame()
+ 
+     int screenWidth;
+     int screenHeight;
++    int scale;                  // hoisted: the GL overlay needs it further down
+     if (currentRenderer == Renderer::OpenGl)
+     {
+-        int scale = static_cast<GLRenderer &>(nds->GPU.GetRenderer3D()).GetScaleFactor();
++        scale = static_cast<GLRenderer &>(nds->GPU.GetRenderer3D()).GetScaleFactor();
+         screenWidth = 256 * scale;
+         screenHeight = (192 + 1) * scale;
+     }
+     else if (currentRenderer == Renderer::Compute)
+     {
+         auto computeRenderSettings = static_cast<ComputeRenderSettings&>(*currentConfiguration->renderSettings);
+-        int scale = computeRenderSettings.scale;
++        scale = computeRenderSettings.scale;
+         screenWidth = 256 * scale;
+         screenHeight = (192 + 1) * scale;
+     }
+     else
+     {
++        scale = 1;
+         screenWidth = 256;
+         screenHeight = 192 + 1;
+     }
+@@ -352,6 +356,14 @@ u32 MelonInstance::runFrame()
          int frontbuf = nds->GPU.FrontBuffer;
          if (nds->GPU.Framebuffer[frontbuf][0] && nds->GPU.Framebuffer[frontbuf][1])
          {
@@ -25,3 +84,18 @@ index 8fdc5c4..6913477 100644
              glBindTexture(GL_TEXTURE_2D, renderFrame->frameTexture);
              glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 0, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][0].get());
              glTexSubImage2D(GL_TEXTURE_2D, 0, 0, 192 + 2, 256, 192, GL_RGBA, GL_UNSIGNED_BYTE, nds->GPU.Framebuffer[frontbuf][1].get());
+@@ -360,7 +372,13 @@ u32 MelonInstance::runFrame()
+     }
+     else
+     {
+-        // Do nothing. Emulator already renders into the texture, which was set-up above
++        // The emulator has rendered both screens into frameTexture already, so
++        // there is no CPU framebuffer to composite into -- which is why the
++        // overlay was missing entirely under OpenGL while software was fine.
++        // Draw the same Frame with GL, into that texture.
++        PSZMix::Frame pszFrame = PSZMix::Update(nds);
++        PSZGLES::Draw(renderFrame->frameTexture, screenWidth, screenHeight * 2,
++                      screenHeight, scale, pszFrame);
+     }
+ 
+     bool isSleeping = nds->CPUStop & CPUStop_Sleep;
