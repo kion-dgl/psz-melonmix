@@ -103,7 +103,7 @@ static const RectDef MenuRects[] = {
 static constexpr int NumMenuRects = sizeof(MenuRects) / sizeof(MenuRects[0]);
 static const RectDef Rects[] = {
     { "PSZ_HUD_PANELRECT",   2,   4, 124, 50, Corner_TopLeft     },  // level / HP / PP
-    { "PSZ_HUD_MAPRECT",   143, 109,  70, 80, Corner_TopRight    },  // room map + key row
+    { "PSZ_HUD_MAPRECT",   144, 110,  70, 70, Corner_TopRight    },  // room map plate
     { "PSZ_HUD_TGTRECT",     2,  96, 124, 56, Corner_BottomLeft  },  // locked-on target
     { "PSZ_HUD_PALRECT",   128,   6, 124, 54, Corner_BottomRight },  // action palette
 };
@@ -113,6 +113,19 @@ static constexpr int NumRects = sizeof(Rects) / sizeof(Rects[0]);
 // cross-fade covers the change. Six improved the title-to-file-select fade on
 // the Retroid but still cut in slightly early, so ten; PSZ_TRANSITION_HOLD
 // retunes it without a rebuild.
+// How solid the minimap is. Opaque it blocks about a seventh of the screen for
+// something the player only glances at, so it defaults to 60%.
+static float MapOpacity()
+{
+    static const float a = [] {
+        const char* v = std::getenv("PSZ_MAP_OPACITY");
+        if (!v) return 0.6f;
+        const float f = (float)std::atof(v);
+        return (f > 0.05f && f <= 1.0f) ? f : 0.6f;
+    }();
+    return a;
+}
+
 static int TransitionHold()
 {
     static const int n = [] {
@@ -615,8 +628,13 @@ Frame Update(NDS* nds)
         const float scale = UseArtHud() ? 1.0f : 0.62f;
         const float fw = (124.0f / 256.0f) * hs * scale;
         const float fh = fw * (kPalArtH / kPalArtW) * (256.0f / 192.0f);
-        const float fx = 1.0f - (2.0f / 256.0f) - fw;
-        const float fy = 1.0f - (2.0f / 192.0f) - fh;
+        // Sits harder into the corner than the 2px margin the clips use --
+        // kion asked for it a few pixels down and further right once the frame
+        // came off. PSZ_PAL_MARGIN="x,y" in DS pixels retunes it.
+        int mx = 0, my = 0;
+        if (const char* o = std::getenv("PSZ_PAL_MARGIN")) std::sscanf(o, "%d,%d", &mx, &my);
+        const float fx = 1.0f - (mx / 256.0f) - fw;
+        const float fy = 1.0f - (my / 192.0f) - fh;
         f.palette = true;
         f.px = fx; f.py = fy; f.pw = fw; f.ph = fh;
 
@@ -629,6 +647,7 @@ Frame Update(NDS* nds)
             cut.dy = fy + (c.ay / kPalArtH) * fh;
             cut.dw = (kIconSize / kPalArtW) * fw;
             cut.dh = (kIconSize / kPalArtH) * fh;
+            cut.alpha = 1.0f;
         }
     }
 
@@ -650,6 +669,20 @@ Frame Update(NDS* nds)
             const bool has = bottomFB ? BoxHasText(bottomFB, e) : BoxHasTextHint();
             if (!has) continue;
         }
+
+        // The minimap goes through the CUT path rather than the element path,
+        // so it can be drawn at partial opacity. Opaque it blocked roughly a
+        // seventh of the screen for something the player only glances at.
+        if (e.corner == Corner_TopRight && f.cutCount < 8)
+        {
+            const Place pl = PlaceElement(e, HudScale());
+            Frame::Cut& c = f.cuts[f.cutCount++];
+            c.sx = e.sx; c.sy = e.sy; c.sw = e.sw; c.sh = e.sh;
+            c.dx = pl.x; c.dy = pl.y; c.dw = pl.w; c.dh = pl.h;
+            c.alpha = MapOpacity();
+            continue;
+        }
+
         f.elems[f.count++] = e;
     }
 
@@ -873,6 +906,20 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
     const int bw = (int)(56 * hs), bh = (int)(3 * hs);
     const int line = kGlyphH + 1;
 
+    // A plate behind it, same as the info panel. Without one the text competes
+    // with whatever is under it and the bars lose their edges over bright ground.
+    const int pw = bw + (int)(6 * hs);
+    const int ph = (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs);
+    for (int py = y - 2; py < y - 2 + ph; py++)
+    {
+        if (py < 0 || py >= 192) continue;
+        for (int px = x - 2; px < x - 2 + pw; px++)
+        {
+            if (px < 0 || px >= 256) continue;
+            dst[py * 256 + px] = 0xD0101820u;
+        }
+    }
+
     char buf[24];
     std::snprintf(buf, sizeof(buf), "Lv%d", f.level);
     DrawText(dst, buf, x, y, 0xFFFFFF);
@@ -1042,6 +1089,7 @@ void Composite(u32* topFB, const u32* bottomFB, const Frame& f)
         if (f.panel && e.corner == Corner_TopLeft) continue;      // drawn instead
         if (f.info[0] && e.corner == Corner_BottomLeft) continue; // drawn instead
         if (f.palette && e.corner == Corner_BottomRight) continue; // frame+cuts
+
         const Place p = PlaceElement(e, hs);
         const int dx = (int)(p.x * 256.0f + 0.5f), dy = (int)(p.y * 192.0f + 0.5f);
         const int dw = (int)(p.w * 256.0f + 0.5f), dh = (int)(p.h * 192.0f + 0.5f);

@@ -10,19 +10,22 @@ static const char* kVert =
     "#version 300 es\n"
     "layout(location=0) in vec2 aPos;\n"
     "layout(location=1) in vec2 aUV;\n"
+    "layout(location=2) in float aAlpha;\n"
     "out vec2 vUV;\n"
-    "void main() { vUV = aUV; gl_Position = vec4(aPos, 0.0, 1.0); }\n";
+    "out float vAlpha;\n"
+    "void main() { vUV = aUV; vAlpha = aAlpha; gl_Position = vec4(aPos, 0.0, 1.0); }\n";
 
 static const char* kFrag =
     "#version 300 es\n"
     "precision mediump float;\n"
     "uniform sampler2D uTex;\n"
     "in vec2 vUV;\n"
+    "in float vAlpha;\n"
     "out vec4 oCol;\n"
     "uniform float uUseAlpha;\n"
     "void main() {\n"
     "  vec4 t = texture(uTex, vUV);\n"
-    "  oCol = vec4(t.rgb, mix(1.0, t.a, uUseAlpha));\n"
+    "  oCol = vec4(t.rgb, mix(1.0, t.a, uUseAlpha) * vAlpha);\n"
     "}\n";
 
 static GLuint gProg = 0, gVAO = 0, gVBO = 0, gFBO = 0, gScratch = 0, gArtTex = 0;
@@ -105,7 +108,7 @@ static bool Init()
 // Push one quad. Positions are NDC over the top-screen viewport; UVs index the
 // scratch copy of the bottom screen.
 static void PushQuad(std::vector<float>& v, const PSZMix::Place& p,
-                     float u0, float v0, float u1, float v1)
+                     float u0, float v0, float u1, float v1, float alpha = 1.0f)
 {
     // The top screen's row 0 sits at NDC y = -1 because the texture stores it
     // as framebuffer row 0. So a placement measured downward from the top of
@@ -119,7 +122,12 @@ static void PushQuad(std::vector<float>& v, const PSZMix::Place& p,
         { x0, y0, u0, v0 }, { x1, y0, u1, v0 }, { x1, y1, u1, v1 },
         { x0, y0, u0, v0 }, { x1, y1, u1, v1 }, { x0, y1, u0, v1 },
     };
-    for (auto& e : q) { v.push_back(e[0]); v.push_back(e[1]); v.push_back(e[2]); v.push_back(e[3]); }
+    for (auto& e : q)
+    {
+        v.push_back(e[0]); v.push_back(e[1]);
+        v.push_back(e[2]); v.push_back(e[3]);
+        v.push_back(alpha);
+    }
 }
 
 void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
@@ -166,7 +174,7 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
         const PSZMix::Frame::Cut& c = f.cuts[i];
         PSZMix::Place p = { c.dx, c.dy, c.dw, c.dh };
         PushQuad(cutVerts, p, c.sx / 256.0f, c.sy / 192.0f,
-                 (c.sx + c.sw) / 256.0f, (c.sy + c.sh) / 192.0f);
+                 (c.sx + c.sw) / 256.0f, (c.sy + c.sh) / 192.0f, c.alpha);
     }
 
     // A frame can be art-only -- the title draws a logo over a modal that is
@@ -217,12 +225,14 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
     glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(verts.size() * sizeof(float)),
                  verts.data(), GL_STREAM_DRAW);
     glEnableVertexAttribArray(0);
-    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)0);
+    glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)0);
     glEnableVertexAttribArray(1);
-    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 4 * sizeof(float), (void*)(2 * sizeof(float)));
+    glVertexAttribPointer(1, 2, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(2 * sizeof(float)));
+    glEnableVertexAttribArray(2);
+    glVertexAttribPointer(2, 1, GL_FLOAT, GL_FALSE, 5 * sizeof(float), (void*)(4 * sizeof(float)));
 
     glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 0.0f);
-    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(verts.size() / 4));
+    glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(verts.size() / 5));
 
     // Our own art -- title logo, drawn player panel -- over the top. This is
     // why the OpenGL renderer showed only the four clips: the drawing lived in
@@ -242,7 +252,7 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
         glEnable(GL_BLEND);
         glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 1.0f);
-        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(full.size() / 4));
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(full.size() / 5));
         glDisable(GL_BLEND);
     }
 
@@ -251,8 +261,11 @@ void Draw(GLuint frameTexture, int texW, int texH, int screenH, int scale,
         glBindTexture(GL_TEXTURE_2D, gScratch);
         glBufferData(GL_ARRAY_BUFFER, (GLsizeiptr)(cutVerts.size() * sizeof(float)),
                      cutVerts.data(), GL_STREAM_DRAW);
+        glEnable(GL_BLEND);
+        glBlendFuncSeparate(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA, GL_ONE, GL_ONE_MINUS_SRC_ALPHA);
         glUniform1f(glGetUniformLocation(gProg, "uUseAlpha"), 0.0f);
-        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(cutVerts.size() / 4));
+        glDrawArrays(GL_TRIANGLES, 0, (GLsizei)(cutVerts.size() / 5));
+        glDisable(GL_BLEND);
     }
 
     glBindVertexArray(0);

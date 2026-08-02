@@ -86,7 +86,7 @@ struct Frame
     // They stay cuts rather than becoming art because WHICH action is in a slot
     // is still unknown (psz-re melonmix-questions.md Q2). Cutting the icon
     // sidesteps that entirely: the game already drew the right one.
-    struct Cut { int sx, sy, sw, sh; float dx, dy, dw, dh; };
+    struct Cut { int sx, sy, sw, sh; float dx, dy, dw, dh; float alpha; };
     Cut cuts[8];
     int cutCount = 0;
 
