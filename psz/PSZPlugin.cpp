@@ -52,6 +52,10 @@ static constexpr u32 MaxPpAddr   = 0x021A210E;
 // unknown, which is why the panel currently always draws.
 static constexpr u32 InfoTextAddr = 0x0211CCD0;
 
+// One plate colour for every drawn panel. The readout and the info box are the
+// same UI and looked it only by coincidence before; this makes it structural.
+static constexpr u32 kPlateRGBA = 0xD0101820u;
+
 // ACTION PALETTE ICON CELLS.
 //
 // Measured, both sides. On the game's bottom screen the three action icons are
@@ -103,7 +107,7 @@ static const RectDef MenuRects[] = {
 static constexpr int NumMenuRects = sizeof(MenuRects) / sizeof(MenuRects[0]);
 static const RectDef Rects[] = {
     { "PSZ_HUD_PANELRECT",   2,   4, 124, 50, Corner_TopLeft     },  // level / HP / PP
-    { "PSZ_HUD_MAPRECT",   144, 110,  70, 70, Corner_TopRight    },  // room map plate
+    { "PSZ_HUD_MAPRECT",   145, 109,  68, 68, Corner_TopRight    },  // map plate, black square only
     { "PSZ_HUD_TGTRECT",     2,  96, 124, 56, Corner_BottomLeft  },  // locked-on target
     { "PSZ_HUD_PALRECT",   128,   6, 124, 54, Corner_BottomRight },  // action palette
 };
@@ -831,6 +835,26 @@ static int DrawText(u32* dst, const char* str, int x, int y, u32 rgb)
         if (p)
         {
             const unsigned char* g = kGlyphs[p - kGlyphChars];
+            // Outline first: a one-pixel dark halo around every lit pixel. This
+            // is what makes small text readable over a moving scene -- without
+            // it a thin stroke disappears into whatever is behind it.
+            for (int gy = -1; gy <= kGlyphH; gy++)
+                for (int gx = -1; gx <= kGlyphW; gx++)
+                {
+                    const int ty = y + gy, tx = x + gx;
+                    if (ty < 0 || ty >= 192 || tx < 0 || tx >= 256) continue;
+                    if (gy >= 0 && gy < kGlyphH && gx >= 0 && gx < kGlyphW &&
+                        g[gy * kGlyphW + gx]) continue;          // lit, not halo
+                    bool near = false;
+                    for (int oy = -1; oy <= 1 && !near; oy++)
+                        for (int ox = -1; ox <= 1; ox++)
+                        {
+                            const int sy = gy + oy, sx = gx + ox;
+                            if (sy < 0 || sy >= kGlyphH || sx < 0 || sx >= kGlyphW) continue;
+                            if (g[sy * kGlyphW + sx]) { near = true; break; }
+                        }
+                    if (near) dst[ty * 256 + tx] = 0xFF000000u;
+                }
             for (int gy = 0; gy < kGlyphH; gy++)
             {
                 const int ty = y + gy;
@@ -889,6 +913,26 @@ static void DrawTitleLogo(u32* dst)
     BlitArt(dst, kArt_logo, (256 - lw) / 2, (192 - lh) / 2 - 8, lw, lh);
 }
 
+// A rounded translucent plate. Both drawn panels use it, so they match.
+static void DrawPlate(u32* dst, int x, int y, int w, int h)
+{
+    if (w <= 0 || h <= 0) return;
+    for (int py = y; py < y + h; py++)
+    {
+        if (py < 0 || py >= 192) continue;
+        for (int px = x; px < x + w; px++)
+        {
+            if (px < 0 || px >= 256) continue;
+            const int ex = (px - x < 2) ? 2 - (px - x)
+                         : (px - (x + w - 1) > -2 ? 2 + (px - (x + w - 1)) : 0);
+            const int ey = (py - y < 2) ? 2 - (py - y)
+                         : (py - (y + h - 1) > -2 ? 2 + (py - (y + h - 1)) : 0);
+            if (ex && ey && ex + ey > 2) continue;      // corner notch
+            dst[py * 256 + px] = kPlateRGBA;
+        }
+    }
+}
+
 // MINIMAL PLAYER READOUT -- the default.
 //
 // The artwork panel is faithful but it is 124x50, half the width of a 256px
@@ -906,19 +950,9 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
     const int bw = (int)(56 * hs), bh = (int)(3 * hs);
     const int line = kGlyphH + 1;
 
-    // A plate behind it, same as the info panel. Without one the text competes
-    // with whatever is under it and the bars lose their edges over bright ground.
-    const int pw = bw + (int)(6 * hs);
-    const int ph = (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs);
-    for (int py = y - 2; py < y - 2 + ph; py++)
-    {
-        if (py < 0 || py >= 192) continue;
-        for (int px = x - 2; px < x - 2 + pw; px++)
-        {
-            if (px < 0 || px >= 256) continue;
-            dst[py * 256 + px] = 0xD0101820u;
-        }
-    }
+    // Rounded, and the same plate as the info box -- they are the same UI.
+    DrawPlate(dst, x - 3, y - 3, bw + (int)(8 * hs),
+              (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs));
 
     char buf[24];
     std::snprintf(buf, sizeof(buf), "Lv%d", f.level);
@@ -1025,19 +1059,7 @@ static void DrawInfoPanel(u32* dst, const Frame& f)
     const int x = 2, y = 192 - 2 - h;
     if (w <= 0 || w > 256) return;
 
-    for (int py = y; py < y + h; py++)
-    {
-        if (py < 0 || py >= 192) continue;
-        for (int px = x; px < x + w; px++)
-        {
-            if (px < 0 || px >= 256) continue;
-            // Rounded corners: skip the four 2px corner notches.
-            const int ex = (px - x < 2) ? 2 - (px - x) : (px - (x + w - 1) > -2 ? 2 + (px - (x + w - 1)) : 0);
-            const int ey = (py - y < 2) ? 2 - (py - y) : (py - (y + h - 1) > -2 ? 2 + (py - (y + h - 1)) : 0);
-            if (ex && ey && ex + ey > 2) continue;
-            dst[py * 256 + px] = 0xD0101820u;      // ~82% opaque near-black
-        }
-    }
+    DrawPlate(dst, x, y, w, h);
 
     DrawText(dst, f.info, x + pad, y + pad, 0xFFFFFF);
 }

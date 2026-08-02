@@ -27,7 +27,7 @@ except ImportError:
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 ART = ROOT / "psz" / "art"
-FONT = ROOT / "psz" / "font" / "Silkscreen-Regular.ttf"
+FONT = ROOT / "psz" / "font" / "Silkscreen-Bold.ttf"
 OUT = ROOT / "psz" / "PSZArt.h"
 
 # Only what is actually drawn. map_grid.png is deliberately absent: the area
@@ -40,9 +40,13 @@ IMAGES = [
     ("palette", "palette_bg.png"),
 ]
 
-# Silkscreen at 8px gives 5px-tall digits, which is right for DS scale -- the
-# whole player panel is 50px tall. The glyphs are alpha only; the draw path
-# tints them, so one set covers white numerals and any colour later.
+# BOLD, and bigger than the first pass. kion reported the HUD text as "really
+# hard to read" on the Retroid: white Silkscreen Regular at 8px is a one-pixel
+# stroke, and one pixel of DS resolution is a thin smear once the screen is
+# scaled to a handheld. Bold doubles the stroke; the draw path adds an outline
+# on top of that.
+#
+# Glyphs are alpha only, so one set tints to any colour.
 # Full printable ASCII, not just digits: the info panel renders the game's own
 # contextual text ("Vulkure", "18 Meseta", "Container") out of the UTF-16 buffer
 # at 0x0211CCD0, so it needs letters, space and punctuation.
