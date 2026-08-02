@@ -291,6 +291,20 @@ static int MenuArmDelay()
     return n;
 }
 
+// How recently START must have been pressed for a rise in control mode 5 to
+// count as the menu opening. Generous, because the game takes a moment to act
+// on the press. PSZ_START_WINDOW retunes it.
+static int StartWindow()
+{
+    static const int n = [] {
+        const char* v = SettingRaw("PSZ_START_WINDOW");
+        if (!v) return 45;
+        const int k = std::atoi(v);
+        return (k >= 1 && k <= 600) ? k : 45;
+    }();
+    return n;
+}
+
 static int ModeHold()
 {
     static const int n = [] {
@@ -760,7 +774,27 @@ Frame Update(NDS* nds)
     static int aliveFrames = 0;
     aliveFrames = inGame ? (aliveFrames < 100000 ? aliveFrames + 1 : aliveFrames) : 0;
     const bool menuArmed = aliveFrames > MenuArmDelay();
-    const bool menuNow = menuArmed && Read(nds, base + 0x280, 4) == 5;
+    const bool ctrl5 = inGame && Read(nds, base + 0x280, 4) == 5;
+
+    // A ROOM CHANGE ALSO SETS CONTROL MODE 5, and unlike a load it does NOT
+    // destroy the player object -- so the alive-frames guard above never resets
+    // and cannot see it. That is the case kion narrowed to: same mode, same
+    // pointer, bottom screen anyway.
+    //
+    // What separates them is not any state the game exposes, it is CAUSE: the
+    // menu opens because START was pressed, a room change does not. So the
+    // menu is believed only when control mode 5 RISES shortly after a START
+    // press, and stays believed while it holds.
+    //
+    // KEYINPUT is active low; bit 3 is START.
+    const bool startDown = !(nds->KeyInput & (1 << 3));
+    static int sinceStart = 100000;
+    sinceStart = startDown ? 0 : (sinceStart < 100000 ? sinceStart + 1 : sinceStart);
+
+    static bool menuCandidate = false;
+    if (!ctrl5) menuCandidate = false;
+    else if (sinceStart < StartWindow()) menuCandidate = true;
+    const bool menuNow = menuArmed && menuCandidate;
     static bool menuShown = false;
     static int menuHold = 0;
     if (menuNow != menuShown)
