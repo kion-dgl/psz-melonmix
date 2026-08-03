@@ -171,6 +171,21 @@ static constexpr u32 CamTgtYaw    = CameraObj + 0x90;
 // Player facing, u16, 65536 = a full turn (psz-re data/hud_memory_map.json).
 static constexpr u32 FacingAddr   = 0x021A2170;
 
+// CHARACTER CREATE (psz-re melonmix-questions.md Q5, answered).
+//
+// A fixed global, not a heap object -- FUN_021227D8 loads 0x02156B38 as a
+// literal and passes it in as the struct base, which is what a once-a-frame
+// reader needs.
+//
+// There is NO single sub-screen index. The three screens take a PAIR, and both
+// halves have code behind them: the 0xFF sentinel is read by FUN_021228C8, and
+// the two widget slots each have a one-instruction accessor and are declared
+// together in the same overlay-11 descriptor block.
+static constexpr u32 CcRaceAddr   = 0x02156B58;   // s8, 0..2
+static constexpr u32 CcClassAddr  = 0x02156B5C;   // u8, 0..13, 0xFF unchosen
+static constexpr u32 CcWidgetCls  = 0x02156B30;   // set on class select
+static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
+
 // One plate colour for every drawn panel. The readout and the info box are the
 // same UI and looked it only by coincidence before; this makes it structural.
 static constexpr u32 kPlateRGBA = 0xD0101820u;
@@ -637,6 +652,20 @@ static bool BoxHasText(const u32* bottomFB, const Element& e)
     return dark > 24;
 }
 
+// Six human, four numan, four cast -- from base[race] = {0, 6, 10} at
+// 0x020F4B04, which a second file independently agrees totals fourteen.
+static const int kCcClassBase[3] = { 0, 6, 10 };
+static const int kCcClassCount[3] = { 6, 4, 4 };
+
+// Which column each local class sits in: 0 Hunter, 1 Ranger, 2 Force. A race
+// that has no class in a column still leaves the space, as the game's own grid
+// does -- cast have no Force, numan no Ranger.
+static const int kCcCols[3][6] = {
+    { 0, 0, 1, 1, 2, 2 },        // human: HU / RA / FO, male then female
+    { 0, 0, 2, 2, -1, -1 },      // numan: HU / --- / FO
+    { 0, 0, 1, 1, -1, -1 },      // cast:  HU / RA / ---
+};
+
 // Right-stick state, set by the frontend once per frame.
 static float gCameraStick = 0.0f;
 static float gMoveX = 0.0f, gMoveY = 0.0f;
@@ -1031,6 +1060,21 @@ Frame Update(NDS* nds)
 
         // Cutscene, dialogue, character create, ending: the top screen is the
         // content. Draw nothing and let it through untouched.
+        // Character create: read the state the game keeps at fixed addresses,
+        // so the screens can be drawn rather than clipped.
+        if (effectiveOverlay == 11)
+        {
+            const u32 cls = Read(nds, CcClassAddr, 1);
+            f.ccRace  = (int)(s8)Read(nds, CcRaceAddr, 1);
+            f.ccClass = (cls == 0xFF) ? -1 : (int)cls;
+            f.ccScreen = (cls == 0xFF)                  ? 1
+                       : Read(nds, CcWidgetApp, 4)      ? 3
+                       : Read(nds, CcWidgetCls, 4)      ? 2
+                                                        : 0;
+            if (f.ccRace < 0 || f.ccRace > 2) f.ccScreen = 0;
+            if (f.ccScreen == 1 || f.ccScreen == 2) f.active = true;
+        }
+
         if (booting ||
             (effectiveOverlay >= 0 && !OverlayWantsBottomScreen(effectiveOverlay)))
             { LogFrame(f, heldOv, inGame, menuShown); return f; }
@@ -1601,6 +1645,64 @@ static void DrawInfoPanel(u32* dst, const Frame& f)
     DrawText(dst, f.info, x + pad, y + pad, 0xFFFFFF);
 }
 
+// A cell: plate, label centred, and a bright rule under the selected one.
+static void DrawCell(u32* dst, int x, int y, int w, int h,
+                     const char* label, bool selected)
+{
+    DrawPlate(dst, x, y, w, h);
+    const int tw = (int)std::strlen(label) * kGlyphW;
+    DrawText(dst, label, x + (w - tw) / 2, y + (h - kGlyphH) / 2,
+             selected ? 0xFFFFFF : 0x9098A0);
+    if (!selected) return;
+    for (int px = x + 2; px < x + w - 2; px++)
+    {
+        const int py = y + h - 2;
+        if (px >= 0 && px < 256 && py >= 0 && py < 192)
+            dst[py * 256 + px] = 0xFF40D0FF;
+    }
+}
+
+// RACE SELECT: one row across the bottom 15% of the screen, evenly spaced --
+// kion's layout, "flex row, space-evenly".
+static void DrawRaceSelect(u32* dst, const Frame& f)
+{
+    static const char* kNames[3] = { "HUMAN", "NUMAN", "CAST" };
+    const int h = (int)(192 * 0.15f);
+    const int y = 192 - h - 3;
+    const int cw = 68, gap = (256 - cw * 3) / 4;
+    for (int i = 0; i < 3; i++)
+        DrawCell(dst, gap + i * (cw + gap), y, cw, h, kNames[i], f.ccRace == i);
+}
+
+// CLASS SELECT: two rows (male, female) by three columns (Hunter, Ranger,
+// Force). A column with no class for this race still takes its space.
+static void DrawClassSelect(u32* dst, const Frame& f)
+{
+    static const char* kCols[3] = { "HUNTER", "RANGER", "FORCE" };
+    if (f.ccRace < 0 || f.ccRace > 2) return;
+
+    const int rows = 2, cols = 3;
+    const int ch = 20, cw = 72;
+    const int gapx = (256 - cw * cols) / (cols + 1);
+    const int top = 192 - (ch * rows + 8) - 3;
+
+    const int local = (f.ccClass >= 0) ? f.ccClass - kCcClassBase[f.ccRace] : -1;
+    for (int r = 0; r < rows; r++)
+        for (int c = 0; c < cols; c++)
+        {
+            const int x = gapx + c * (cw + gapx);
+            const int y = top + r * (ch + 4);
+
+            // Is there a class here for this race?
+            int slot = -1;
+            for (int i = 0; i < kCcClassCount[f.ccRace]; i++)
+                if (kCcCols[f.ccRace][i] == c && (i % 2) == r) { slot = i; break; }
+
+            if (slot < 0) { DrawPlate(dst, x, y, cw, ch); continue; }   // empty, holds space
+            DrawCell(dst, x, y, cw, ch, kCols[c], slot == local);
+        }
+}
+
 bool RenderArtLayer(u32* out, const Frame& f)
 {
     if (!out || !f.active) return false;
@@ -1609,7 +1711,8 @@ bool RenderArtLayer(u32* out, const Frame& f)
     const bool wantPanel = !f.modal && f.panel;
     const bool wantInfo  = !f.modal && f.info[0];
     const bool wantPal   = !f.modal && f.palette;
-    if (!wantLogo && !wantPanel && !wantInfo && !wantPal) return false;
+    const bool wantCc    = f.ccScreen == 1 || f.ccScreen == 2;
+    if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc) return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
     if (wantLogo)  DrawTitleLogo(out, f.logoAlpha);
@@ -1617,6 +1720,8 @@ bool RenderArtLayer(u32* out, const Frame& f)
     if (wantInfo)  DrawInfoPanel(out, f);
     // Frame only; the icons are cuts, drawn by the frontend from the game's own
     // bottom screen -- see Frame::cuts.
+    if (f.ccScreen == 1) DrawRaceSelect(out, f);
+    if (f.ccScreen == 2) DrawClassSelect(out, f);
     if (wantPal && UseArtHud())
         BlitArt(out, kArt_palette, (int)(f.px * 256), (int)(f.py * 192),
                 (int)(f.pw * 256), (int)(f.ph * 192));

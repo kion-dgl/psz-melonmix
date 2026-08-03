@@ -100,6 +100,11 @@ struct Frame
     // and folded to ASCII so we can render it in our font. Empty when unknown.
     char info[48] = {0};
 
+    // Character create (overlay 11). screen: 0 none, 1 race, 2 class, 3 appearance.
+    int ccScreen = 0;
+    int ccRace = -1;        // 0..2
+    int ccClass = -1;       // global code 0..13, -1 when unchosen
+
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
     Room rooms[MaxRooms];
