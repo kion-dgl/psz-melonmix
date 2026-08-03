@@ -664,10 +664,15 @@ static const int kCcClassCount[3] = { 6, 4, 4 };
 //
 // NOT drawn as a grid with holes. That was the horizontal design; a vertical
 // list of only the classes that exist has nothing to leave a space for.
+// Index 1 is CAST and index 2 is NEWMAN -- the order kion sees on screen, and
+// the order the race sprites are named in (obs_hum, obs_cast, obs_newman). The
+// class counts cannot settle this: cast and newman both have four, so 6/4/4 is
+// identical under either assignment. Only the on-screen order distinguishes
+// them, which is why psz-re's table labels were taken as read and were wrong.
 static const char* kCcClassNames[3][6] = {
     { "HUmar", "HUmarl", "RAmar", "RAmarl", "FOmar", "FOmarl" },
-    { "HUnewm", "HUnewearl", "FOnewm", "FOnewearl", nullptr, nullptr },
     { "HUcast", "HUcaseal", "RAcast", "RAcaseal", nullptr, nullptr },
+    { "HUnewm", "HUnewearl", "FOnewm", "FOnewearl", nullptr, nullptr },
 };
 
 // Right-stick state, set by the frontend once per frame.
@@ -1685,11 +1690,10 @@ static void DrawLeftList(u32* dst, const char* const* items, int n, int selected
         DrawListRow(dst, 6, y0 + i * (h + gap), w, h, items[i], i == selected);
 }
 
-// RACE: human, newman, cast -- the order the game shows them, which is also the
-// index order psz-re read off base[race] = {0, 6, 10}.
+// RACE: human, cast, newman -- the order the game shows them.
 static void DrawRaceSelect(u32* dst, const Frame& f)
 {
-    static const char* kNames[3] = { "Human", "Newman", "Cast" };
+    static const char* kNames[3] = { "Human", "Cast", "Newman" };
     DrawLeftList(dst, kNames, 3, f.ccRace);
 }
 
