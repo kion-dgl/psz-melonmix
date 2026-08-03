@@ -657,13 +657,17 @@ static bool BoxHasText(const u32* bottomFB, const Element& e)
 static const int kCcClassBase[3] = { 0, 6, 10 };
 static const int kCcClassCount[3] = { 6, 4, 4 };
 
-// Which column each local class sits in: 0 Hunter, 1 Ranger, 2 Force. A race
-// that has no class in a column still leaves the space, as the game's own grid
-// does -- cast have no Force, numan no Ranger.
-static const int kCcCols[3][6] = {
-    { 0, 0, 1, 1, 2, 2 },        // human: HU / RA / FO, male then female
-    { 0, 0, 2, 2, -1, -1 },      // numan: HU / --- / FO
-    { 0, 0, 1, 1, -1, -1 },      // cast:  HU / RA / ---
+// The class names themselves, in code order within each race. Six/four/four is
+// what makes the roster fourteen, and it falls out as three types by two
+// genders for humans and two types by two for the others -- newman have no
+// Ranger, cast no Force, which is the gap kion named.
+//
+// NOT drawn as a grid with holes. That was the horizontal design; a vertical
+// list of only the classes that exist has nothing to leave a space for.
+static const char* kCcClassNames[3][6] = {
+    { "HUmar", "HUmarl", "RAmar", "RAmarl", "FOmar", "FOmarl" },
+    { "HUnewm", "HUnewearl", "FOnewm", "FOnewearl", nullptr, nullptr },
+    { "HUcast", "HUcaseal", "RAcast", "RAcaseal", nullptr, nullptr },
 };
 
 // Right-stick state, set by the frontend once per frame.
@@ -1645,62 +1649,58 @@ static void DrawInfoPanel(u32* dst, const Frame& f)
     DrawText(dst, f.info, x + pad, y + pad, 0xFFFFFF);
 }
 
-// A cell: plate, label centred, and a bright rule under the selected one.
-static void DrawCell(u32* dst, int x, int y, int w, int h,
-                     const char* label, bool selected)
+// A left-aligned row in a vertical list: plate, label, and a bright bar down
+// the leading edge of the selected one.
+static void DrawListRow(u32* dst, int x, int y, int w, int h,
+                        const char* label, bool selected)
 {
     DrawPlate(dst, x, y, w, h);
-    const int tw = (int)std::strlen(label) * kGlyphW;
-    DrawText(dst, label, x + (w - tw) / 2, y + (h - kGlyphH) / 2,
+    DrawText(dst, label, x + 7, y + (h - kGlyphH) / 2,
              selected ? 0xFFFFFF : 0x9098A0);
     if (!selected) return;
-    for (int px = x + 2; px < x + w - 2; px++)
-    {
-        const int py = y + h - 2;
-        if (px >= 0 && px < 256 && py >= 0 && py < 192)
-            dst[py * 256 + px] = 0xFF40D0FF;
-    }
+    for (int py = y + 2; py < y + h - 2; py++)
+        for (int px = x + 2; px < x + 4; px++)
+            if (px >= 0 && px < 256 && py >= 0 && py < 192)
+                dst[py * 256 + px] = 0xFF40D0FF;
 }
 
-// RACE SELECT: one row across the bottom 15% of the screen, evenly spaced --
-// kion's layout, "flex row, space-evenly".
+// One vertical list down the LEFT side. Horizontal was the first attempt and it
+// fought the game: these menus are driven up and down, so a row of options put
+// the reading order at right angles to the control. Down the left also leaves
+// the character preview -- the point of the top screen here -- unobscured.
+static void DrawLeftList(u32* dst, const char* const* items, int n, int selected)
+{
+    const int h = 15, gap = 2;
+    int w = 0;
+    for (int i = 0; i < n; i++)
+    {
+        const int tw = (int)std::strlen(items[i]) * kGlyphW + 14;
+        if (tw > w) w = tw;
+    }
+    if (w > 148) w = 148;
+
+    const int total = n * h + (n - 1) * gap;
+    const int y0 = (192 - total) / 2;
+    for (int i = 0; i < n; i++)
+        DrawListRow(dst, 6, y0 + i * (h + gap), w, h, items[i], i == selected);
+}
+
+// RACE: human, newman, cast -- the order the game shows them, which is also the
+// index order psz-re read off base[race] = {0, 6, 10}.
 static void DrawRaceSelect(u32* dst, const Frame& f)
 {
-    static const char* kNames[3] = { "HUMAN", "NUMAN", "CAST" };
-    const int h = (int)(192 * 0.15f);
-    const int y = 192 - h - 3;
-    const int cw = 68, gap = (256 - cw * 3) / 4;
-    for (int i = 0; i < 3; i++)
-        DrawCell(dst, gap + i * (cw + gap), y, cw, h, kNames[i], f.ccRace == i);
+    static const char* kNames[3] = { "Human", "Newman", "Cast" };
+    DrawLeftList(dst, kNames, 3, f.ccRace);
 }
 
-// CLASS SELECT: two rows (male, female) by three columns (Hunter, Ranger,
-// Force). A column with no class for this race still takes its space.
+// CLASS: the exact class names for the chosen race, and only the ones that
+// exist. No placeholder for the missing combination.
 static void DrawClassSelect(u32* dst, const Frame& f)
 {
-    static const char* kCols[3] = { "HUNTER", "RANGER", "FORCE" };
     if (f.ccRace < 0 || f.ccRace > 2) return;
-
-    const int rows = 2, cols = 3;
-    const int ch = 20, cw = 72;
-    const int gapx = (256 - cw * cols) / (cols + 1);
-    const int top = 192 - (ch * rows + 8) - 3;
-
+    const int n = kCcClassCount[f.ccRace];
     const int local = (f.ccClass >= 0) ? f.ccClass - kCcClassBase[f.ccRace] : -1;
-    for (int r = 0; r < rows; r++)
-        for (int c = 0; c < cols; c++)
-        {
-            const int x = gapx + c * (cw + gapx);
-            const int y = top + r * (ch + 4);
-
-            // Is there a class here for this race?
-            int slot = -1;
-            for (int i = 0; i < kCcClassCount[f.ccRace]; i++)
-                if (kCcCols[f.ccRace][i] == c && (i % 2) == r) { slot = i; break; }
-
-            if (slot < 0) { DrawPlate(dst, x, y, cw, ch); continue; }   // empty, holds space
-            DrawCell(dst, x, y, cw, ch, kCols[c], slot == local);
-        }
+    DrawLeftList(dst, kCcClassNames[f.ccRace], n, local);
 }
 
 bool RenderArtLayer(u32* out, const Frame& f)
