@@ -323,6 +323,30 @@ All of it works. Booted cold and driven with buttons only, no touch:
 | **Character create** | race select (Human / CAST / Newman) with art behind |
 | **Quest counter** (`ov12`) | area select — Gurhacia Valley, description, difficulty stars |
 
+### Why character create draws its own UI at all — the preview
+
+The option lists on these screens are meaningless on their own. Race, class and
+especially appearance are choices you make *by looking at the character*, and the
+character is on the TOP screen. Present the bottom screen whole, the way the title
+and file select are presented, and you get sliders with nothing to judge them
+against — the interaction survives and the reason for it does not.
+
+That is the whole reason these screens are drawn from our own art rather than
+clipped or presented: it is the one way to have the option list and the preview at
+the same time. Appearance is what forces it, and race and class follow because the
+machinery already exists and the preview is just as much the point there.
+
+**So the bottom screen is right for exactly one screen in create: name entry.** It
+is the only one where the preview does not matter, and the only one that cannot
+work without the game's own keyboard. Anything that presents the bottom screen
+more widely than that is trading the preview away, and the preview is the feature.
+
+Worth stating plainly because the obvious fix for a name-entry detection failure —
+"just present the bottom screen for the whole appearance screen" — looks like a
+small concession and is actually the removal of the thing these screens exist for.
+`PSZ_CC_BOTTOM` and the SELECT toggle are escape hatches for when detection fails,
+not a way of working.
+
 **A psz-re claim is contradicted by this.** `docs/game-state.md` says under Traps:
 "The title screen runs with the bottom screen off, while file select uses both",
 and offers reading the display control registers as a way to separate the
