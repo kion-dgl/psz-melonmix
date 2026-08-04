@@ -5,7 +5,7 @@
 # melonDS cores with independent histories (melonDS proper, and the Android
 # project's own fork). One fork cannot serve both. But psz/PSZPlugin.{h,cpp}
 # compiled unmodified in both, so a portable plugin plus a thin per-frontend hook
-# does — and the hooks are 32 and 39 patch lines respectively.
+# does — and the hooks stay thin on both sides.
 
 [melonds]
 url = "https://github.com/melonDS-emu/melonDS.git"

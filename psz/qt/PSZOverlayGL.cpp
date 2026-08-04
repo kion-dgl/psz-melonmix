@@ -147,6 +147,85 @@ void OverlayGL::quad(float x, float y, float w, float h,
     glDrawArrays(GL_TRIANGLES, 0, 6);
 }
 
+void OverlayGL::fill(float x, float y, float w, float h,
+                     float r, float g, float b, float a)
+{
+    // Negative alpha is the shader's "solid fill" signal -- see kFS.
+    quad(x, y, w, h, 0, 0, 1, 1, 0.f, -a, r, g, b);
+}
+
+// Carried over from the QPainter path, which is where SELECT used to be handled
+// and nowhere else -- so the map did nothing on the renderer most people run.
+// Deliberately the same arithmetic: cell size from 55% of screen height,
+// centred, with a 10px surround.
+void OverlayGL::drawAreaMap(const Frame& f, float ax, float ay, float aw, float ah)
+{
+    if (f.roomCount <= 0) return;
+
+    int minX = 255, maxX = 0, minY = 255, maxY = 0;
+    for (int i = 0; i < f.roomCount; i++)
+    {
+        const Room& r = f.rooms[i];
+        if (r.cx < minX) minX = r.cx;
+        if (r.cx > maxX) maxX = r.cx;
+        if (r.cy < minY) minY = r.cy;
+        if (r.cy > maxY) maxY = r.cy;
+    }
+    const int cols = maxX - minX + 1, rows = maxY - minY + 1;
+    if (cols <= 0 || rows <= 0 || cols > 32 || rows > 32) return;
+
+    float cell = (ah * 0.55f) / (float)(cols > rows ? cols : rows);
+    if (cell < 8.f) cell = 8.f;
+    const float gw = cols * cell, gh = rows * cell;
+    const float x0 = ax + aw * 0.5f - gw * 0.5f;
+    const float y0 = ay + ah * 0.5f - gh * 0.5f;
+
+    // One opacity over the whole grid, so the field stays readable underneath.
+    // QPainter had setOpacity for this; here it multiplies into each quad's
+    // alpha, which is why every constant below is scaled by it.
+    const float o = envFloat("PSZ_MAP_OPACITY", 0.5f, 0.05f, 1.f);
+
+    // Surround: the border colour as a filled rect, with the backdrop inset by
+    // one pixel over it. Cheaper than four edge quads and it reads the same.
+    fill(x0 - 10.f, y0 - 10.f, gw + 20.f, gh + 20.f, 210/255.f, 230/255.f, 255/255.f, 0.86f * o);
+    fill(x0 - 9.f,  y0 - 9.f,  gw + 18.f, gh + 18.f, 8/255.f,   12/255.f,  22/255.f,  0.92f * o);
+
+    for (int i = 0; i < f.roomCount; i++)
+    {
+        const Room& r = f.rooms[i];
+        const float rx = x0 + (r.cx - minX) * cell, ry = y0 + (r.cy - minY) * cell;
+        const float pad = cell / 10.f + 1.f;
+        const bool here = (i == f.curRoom);
+
+        const float cx = rx + pad, cy = ry + pad, cw = cell - pad * 2, ch = cell - pad * 2;
+        if (cw <= 2.f || ch <= 2.f) continue;
+
+        fill(cx, cy, cw, ch, 1.f, 1.f, 1.f, 0.94f * o);      // outline
+        if (here) fill(cx + 1, cy + 1, cw - 2, ch - 2, 1.f, 210/255.f, 70/255.f, 1.f * o);
+        else      fill(cx + 1, cy + 1, cw - 2, ch - 2, 150/255.f, 200/255.f, 1.f, 0.96f * o);
+
+        for (int k = 0; k < 4; k++)
+        {
+            if (r.exits[k] == 0xFF) continue;
+            const bool open = (r.gates[k] == 0);
+            const float cr = open ? 235/255.f : 1.f;
+            const float cg = open ? 235/255.f : 120/255.f;
+            const float cb = open ? 235/255.f : 120/255.f;
+            const float ca = (open ? 0.86f : 0.92f) * o;
+
+            float t = cell / 7.f; if (t < 2.f) t = 2.f;
+            const float mx = rx + cell * 0.5f, my = ry + cell * 0.5f;
+            switch (k)   // N E S W
+            {
+            case 0: fill(mx - t * 0.5f, ry,                    t,       pad + t, cr, cg, cb, ca); break;
+            case 1: fill(rx + cell - pad - t, my - t * 0.5f,   pad + t, t,       cr, cg, cb, ca); break;
+            case 2: fill(mx - t * 0.5f, ry + cell - pad - t,   t,       pad + t, cr, cg, cb, ca); break;
+            case 3: fill(rx, my - t * 0.5f,                    pad + t, t,       cr, cg, cb, ca); break;
+            }
+        }
+    }
+}
+
 void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float topRect[4])
 {
     if (!prog || !f.active) return;
@@ -246,6 +325,10 @@ void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float t
              c.sx / 256.f, c.sy / 192.f, (c.sx + c.sw) / 256.f, (c.sy + c.sh) / 192.f,
              1.f, c.alpha, 1.f, 1.f, 1.f);
     }
+
+    // Over everything, including a modal: SELECT is meant to answer "where am
+    // I" without leaving whatever is on screen.
+    if (f.areaMap) drawAreaMap(f, ax, ay, aw, ah);
 
     glBindVertexArray(0);
 }

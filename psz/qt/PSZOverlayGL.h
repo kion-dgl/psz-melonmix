@@ -1,14 +1,17 @@
 /*
     OpenGL drawing for the PSZ single-screen overlay -- psz-melonmix.
 
-    The Qt frontend has two display paths and picks between them in Window.cpp:
+    The ONLY desktop overlay. Upstream has two display paths and picks between
+    them in Window.cpp, so this build used to carry an overlay for each: this
+    one, and a QPainter one in ScreenPanelNative. Two implementations of the same
+    drawing is how they drift, and they did -- the QPainter path went a release
+    without our own art, so the title had no logo and character create had no UI
+    at all, on whichever path the user's renderer setting happened to select.
 
-        hasOGL = Screen.UseGL || (3D.Renderer != renderer3D_Software)
-
-    so asking for hi-res 3D (3D.GL.ScaleFactor) switches the whole display to
-    ScreenPanelGL. The QPainter overlay lives in ScreenPanelNative and simply
-    does not run there -- which meant hi-res 3D did not degrade the HUD, it
-    removed it. This is the same overlay for that path.
+    So createScreenPanel is patched to always build ScreenPanelGL and the
+    QPainter overlay is gone. The software 3D RENDERER still works and is still
+    selectable; it feeds this panel like the GL one does. What was removed is the
+    software DISPLAY path, which is the thing that chose between overlays.
 
     It draws quads sampling the screen texture the frontend has already uploaded:
     a GL_TEXTURE_2D_ARRAY with layer 0 = top screen and layer 1 = bottom. Every
@@ -49,6 +52,15 @@ private:
               float u0, float v0, float u1, float v1,
               float layer, float alpha, float r, float g, float b,
               float texAlpha = 0.f);
+
+    // Solid colour, no texture fetch. r/g/b/a are 0..1.
+    void fill(float x, float y, float w, float h,
+              float r, float g, float b, float a);
+
+    // The SELECT area grid. Drawn from quads rather than clipped from anywhere:
+    // it is built out of the game's own room table, and has no pixels on either
+    // screen to copy.
+    void drawAreaMap(const Frame& f, float ax, float ay, float aw, float ah);
 
     unsigned int prog = 0, vao = 0, artTex = 0;
     int uScreenSize = -1, uDstRect = -1, uSrcRect = -1, uLayer = -1, uTint = -1;

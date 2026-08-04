@@ -72,13 +72,20 @@ retune it without a rebuild:
 | `PSZ_CHEAT_WIDESCREEN=0` | back to 4:3 |
 | `PSZ_HUD_MAPRECT="x,y,w,h"` and friends | per-element source rects |
 
+**An OpenGL context is required.** Upstream melonDS has two display paths and
+picks one from the renderer setting; this build always uses the GL one, because
+carrying a separate overlay for each is how the two drifted — the QPainter one
+spent a release drawing the ported clips and none of our own art, so whether the
+title had its logo depended on a setting nobody would connect to it. The software
+3D *renderer* is untouched and still selectable; it feeds the same GL panel.
+
 ## How it is put together
 
 ```
 psz/            ours, portable — the only place game knowledge lives
   PSZPlugin.*     reads state, returns a Frame: what to draw and where from
-  qt/             desktop drawing, at window resolution
-integration/    thin hooks against pinned upstreams (32 and 39 patch lines)
+  qt/             desktop drawing (GL), at window resolution
+integration/    thin hooks against pinned upstreams
 upstreams.toml  pinned revs, one place
 scripts/        bootstrap + per-target builds
 ```

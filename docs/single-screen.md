@@ -75,6 +75,11 @@ job). Read memory only for scene detection and the controller hacks.
       (`PSZ_MAP_OPACITY`), sized to 55% of screen height, so the field stays
       readable underneath while navigating. `PSZ_HUD_AREAMAP=1` pins it on.
 
+      Drawn on the QPainter path only, at first — so it did nothing at all on the
+      renderer most people run. Now ported to the GL path from the same
+      arithmetic, as solid-colour quads: the grid is built out of the game's own
+      room table and has no pixels on either screen to clip.
+
   **SELECT was chosen by measurement, not assumption.** With the game idle,
   pressing SELECT changed 78 pixels of the bottom-screen HUD against an idle
   drift of 90 — i.e. nothing above noise. X changed 227, roughly 2.5x the drift,
@@ -290,6 +295,21 @@ That is what makes the Android port tractable: melonDS-android shares `src/`, so
 it inherits `PSZPlugin` and has to implement drawing only — four scaled blits, a
 full-screen blit for modals, and a grid of rectangles. No game knowledge crosses
 over, and no address gets re-derived.
+
+**One drawing path per frontend, though — the split has a cost and it was paid.**
+The desktop had two, because upstream has two display panels and picks between
+them from the renderer setting. Both had to carry an overlay, and the QPainter one
+fell behind without anything failing: it drew the ported clips and none of our own
+art, so the title had no logo and character create had no UI, on whichever path
+the user's settings happened to select. There was no signal, because each path was
+individually plausible.
+
+`createScreenPanel` is now patched to always build `ScreenPanelGL`, and the
+QPainter overlay is deleted. The software 3D *renderer* is untouched and still
+selectable — it feeds the same GL panel. What went is the software *display* path,
+which is the thing that chose between overlays. An OpenGL context is now required
+to run this build at all, which is the trade: one path that is always the tested
+one, against a machine with no working GL getting an empty window and a log line.
 
 ## Front-to-end flow, walked under the single-screen overlay
 
