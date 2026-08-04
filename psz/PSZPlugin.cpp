@@ -694,16 +694,26 @@ static const int kCcClassCount[3] = { 6, 4, 4 };
 //
 // NOT drawn as a grid with holes. That was the horizontal design; a vertical
 // list of only the classes that exist has nothing to leave a space for.
-// Index 1 is CAST and index 2 is NEWMAN -- the order kion sees on screen, and
-// the order the race sprites are named in (obs_hum, obs_cast, obs_newman). The
-// class counts cannot settle this: cast and newman both have four, so 6/4/4 is
-// identical under either assignment. Only the on-screen order distinguishes
-// them, which is why psz-re's table labels were taken as read and were wrong.
+// Indexed by RACE VALUE, which is NOT screen order. Measured on device by
+// stepping the race cursor and reading 0x02156B58 at each row:
+//
+//   screen row 0  Human   -> race 0
+//   screen row 1  CAST    -> race 2
+//   screen row 2  Newman  -> race 1
+//
+// So psz-re's table labels (human, numan, cast for 0, 1, 2) were right all
+// along; what differs is the order the game DRAWS them. An earlier round
+// swapped these lists to fix the display and broke the mapping instead -- the
+// labels came out right while the highlight tracked the wrong row, which is
+// exactly what kion saw.
 static const char* kCcClassNames[3][6] = {
-    { "HUmar", "HUmarl", "RAmar", "RAmarl", "FOmar", "FOmarl" },
-    { "HUcast", "HUcaseal", "RAcast", "RAcaseal", nullptr, nullptr },
-    { "HUnewm", "HUnewearl", "FOnewm", "FOnewearl", nullptr, nullptr },
+    { "HUmar", "HUmarl", "RAmar", "RAmarl", "FOmar", "FOmarl" },      // race 0 human
+    { "HUnewm", "HUnewearl", "FOnewm", "FOnewearl", nullptr, nullptr },// race 1 newman
+    { "HUcast", "HUcaseal", "RAcast", "RAcaseal", nullptr, nullptr },  // race 2 cast
 };
+
+// Display row -> race value. Human, CAST, Newman, as the game draws them.
+static const int kCcRaceRow[3] = { 0, 2, 1 };
 
 // Right-stick state, set by the frontend once per frame.
 static float gCameraStick = 0.0f;
@@ -1787,8 +1797,12 @@ static void DrawAppearance(u32* dst, const Frame& f)
 // RACE: human, cast, newman -- the order the game shows them.
 static void DrawRaceSelect(u32* dst, const Frame& f)
 {
-    static const char* kNames[3] = { "Human", "Cast", "Newman" };
-    DrawLeftList(dst, kNames, 3, f.ccRace);
+    static const char* kNames[3] = { "Human", "CAST", "Newman" };
+    // Highlight the ROW whose race value is selected, not the row numbered by
+    // it. Those differ for CAST and Newman.
+    int sel = -1;
+    for (int i = 0; i < 3; i++) if (kCcRaceRow[i] == f.ccRace) sel = i;
+    DrawLeftList(dst, kNames, 3, sel);
 }
 
 // CLASS: the exact class names for the chosen race, and only the ones that
