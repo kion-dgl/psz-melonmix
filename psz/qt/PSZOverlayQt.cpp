@@ -83,21 +83,24 @@ void pszDrawElement(QPainter& p, const QImage& bottom, const Element& e,
 }
 
 // Modal: the bottom screen IS the interaction (menus, shop, quest counter,
-// title, file select), so present it whole rather than compositing corners.
-// PSO-style: leave the top screen readable around the menu rather than burying
-// it. The pre-game screens are SPLIT scenes -- character create puts its
-// description on the top screen, the quest counter its "Select an area." prompt,
-// the title its logo -- so a modal at 88% of height was hiding information the
-// dual-screen original shows. At 66% with a light dim, both are legible at once.
+// title, file select), so present it whole rather than compositing corners. It
+// takes the WHOLE top screen, which is what the Android build does -- there
+// Composite() copies the bottom framebuffer over the top one outright.
 //
-// PSZ_MODAL_SCALE and PSZ_MODAL_DIM tune it; 1.0 and 170 restore the old
-// full-cover behaviour.
+// It was a 66% centred inset with a dim, on the reasoning that the pre-game
+// screens are SPLIT scenes and the top screen should stay readable beside the
+// menu. But the split scenes' top halves are drawn by the ART LAYER, in the
+// modal's own space -- the title logo, the character-create panels -- so the
+// inset was shrinking the very content it existed to make room for, and the two
+// builds disagreed about what a menu looks like.
+//
+// PSZ_MODAL_SCALE below 1 restores the inset, with PSZ_MODAL_DIM behind it.
 void pszDrawModal(QPainter& p, const QImage& bottom, const QRectF& A)
 {
     static float sc = -1.f; static int dim = -1;
     if (sc < 0.f)
     {
-        sc = 0.66f;
+        sc = 1.0f;
         if (const char* v = std::getenv("PSZ_MODAL_SCALE"))
         { float f = (float)atof(v); if (f > 0.2f && f <= 1.f) sc = f; }
         dim = 90;
@@ -105,11 +108,22 @@ void pszDrawModal(QPainter& p, const QImage& bottom, const QRectF& A)
         { int d = atoi(v); if (d >= 0 && d <= 255) dim = d; }
     }
 
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+    if (sc >= 1.0f)
+    {
+        // Fill, not fit. The widescreen cheat widens the 3D projection into the
+        // same 256x192 buffer, so stretching it back is correct for gameplay;
+        // the 2D screens are genuinely stretched by it, and that is the same
+        // trade the Android layout takes deliberately.
+        p.drawImage(A, bottom, QRectF(0, 0, 256, 192));
+        return;
+    }
+
     const float fit = (float)(A.height() * sc) / 192.0f;
     const int w = (int)(256 * fit), h = (int)(192 * fit);
     const int dx = (int)A.center().x() - w / 2, dy = (int)A.center().y() - h / 2;
 
-    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.fillRect(A, QColor(0, 0, 0, dim));
     p.fillRect(QRect(dx - 3, dy - 3, w + 6, h + 6), QColor(230, 240, 255, 235));
     p.drawImage(QRect(dx, dy, w, h), bottom, QRect(0, 0, 256, 192));
@@ -184,15 +198,59 @@ void DrawOverlayQt(QPainter& p, const QImage& bottom, const QRectF& top, const F
 {
     if (!f.active) return;
 
+    // Our own art -- the title logo, the drawn player panel, the info panel, the
+    // character-create panels -- comes from the core as a 256x192 straight-alpha
+    // layer. None of it has source pixels on either screen, so none of it can be
+    // a clip, and a frame can be art-ONLY: the title is a logo over a modal.
+    // Rendered before the early returns for that reason.
+    static u32 artLayer[256 * 192];
+    const bool haveArt = RenderArtLayer(artLayer, f);
+
     if (f.modal)
     {
         pszDrawModal(p, bottom, top);
-        return;
+    }
+    else
+    {
+        const float scale = pszHudScale();
+        for (int i = 0; i < f.count; i++)
+        {
+            const Element& e = f.elems[i];
+
+            // The art layer draws these outright, so their clips would show
+            // through underneath. Composite() and the Android GL path skip the
+            // same three.
+            if (f.panel && e.corner == Corner_TopLeft) continue;
+            if (f.info[0] && e.corner == Corner_BottomLeft) continue;
+            if (f.palette && e.corner == Corner_BottomRight) continue;
+
+            pszDrawElement(p, bottom, e, top, scale);
+        }
     }
 
-    const float scale = pszHudScale();
-    for (int i = 0; i < f.count; i++)
-        pszDrawElement(p, bottom, f.elems[i], top, scale);
+    if (haveArt)
+    {
+        // Format_ARGB32 is straight alpha and 0xAARRGGBB, which is exactly what
+        // RenderArtLayer packs -- no conversion, and no copy either: the QImage
+        // borrows the buffer, which is static and outlives this call.
+        const QImage art((const uchar*)artLayer, 256, 192, QImage::Format_ARGB32);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        p.drawImage(top, art, QRectF(0, 0, 256, 192));
+    }
+
+    // Cuts LAST. They land inside artwork the layer draws -- the palette's
+    // action icons sit in the slots of our own frame -- so drawing them with the
+    // other clips puts them under it and they vanish.
+    for (int i = 0; i < f.cutCount; i++)
+    {
+        const Frame::Cut& c = f.cuts[i];
+        const QRectF dst(top.left() + c.dx * top.width(),
+                         top.top()  + c.dy * top.height(),
+                         c.dw * top.width(), c.dh * top.height());
+        p.setOpacity(c.alpha);
+        p.drawImage(dst, bottom, QRectF(c.sx, c.sy, c.sw, c.sh));
+    }
+    p.setOpacity(1.0);
 
     if (f.areaMap)
         pszDrawAreaMap(p, f, top);

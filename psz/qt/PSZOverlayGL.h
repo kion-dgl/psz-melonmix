@@ -14,6 +14,14 @@
     a GL_TEXTURE_2D_ARRAY with layer 0 = top screen and layer 1 = bottom. Every
     ported element is a sub-rect of layer 1, so no extra upload is needed and the
     elements stay crisp at whatever internal resolution the 3D renderer is using.
+
+    Our OWN art -- the title logo, the drawn player panel, the character-create
+    panels -- has no source pixels on either screen, so it cannot be a clip. It
+    comes from PSZMix::RenderArtLayer as a 256x192 straight-alpha layer that is
+    uploaded and drawn over the top screen, exactly as the Android GL path does
+    it. Rendering it on the CPU and uploading is deliberate: both renderers then
+    produce the same image by construction rather than by two implementations of
+    the same drawing agreeing with each other.
 */
 
 #ifndef PSZOVERLAYGL_H
@@ -39,10 +47,16 @@ public:
 private:
     void quad(float x, float y, float w, float h,
               float u0, float v0, float u1, float v1,
-              float layer, float alpha, float r, float g, float b);
+              float layer, float alpha, float r, float g, float b,
+              float texAlpha = 0.f);
 
-    unsigned int prog = 0, vao = 0;
+    unsigned int prog = 0, vao = 0, artTex = 0;
     int uScreenSize = -1, uDstRect = -1, uSrcRect = -1, uLayer = -1, uTint = -1;
+    int uTexAlpha = -1;
+
+    // Per instance rather than a file-scope buffer: melonDS can open a second
+    // window, and each one draws on its own GL thread.
+    u32 artLayer[256 * 192] = {};
 };
 
 }
