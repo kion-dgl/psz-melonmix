@@ -1217,11 +1217,66 @@ Frame Update(NDS* nds)
                     else if (nameEntry && ++rowFrames > 30) { nameEntry = false; rowFrames = 0; }
                     if (nameEntry) f.ccScreen = 4;
 
-                    // The measurement that would settle Q6. Every candidate in
-                    // the widget table around the two pointers we know, plus the
-                    // cursor, logged when any of them moves -- so one pass
-                    // through name entry says which word is the real signal and
-                    // this heuristic can be deleted rather than tuned.
+                    // SCAN: find the signal rather than guess at it.
+                    //
+                    // PSZ_CC_PROBE watched five words and found nothing -- the
+                    // cursor only ever reads 0..6 and no pointer in the table
+                    // moves, so whatever marks name entry is somewhere this
+                    // project has not looked. Guessing a sixth address is how
+                    // the last guess got here.
+                    //
+                    // So: baseline two regions while the cursor sits on the last
+                    // row ("Next Settings", the row you press A on to leave),
+                    // then report every byte that changes afterwards. Pressing A
+                    // from there enters name entry, so the first thing this
+                    // prints IS the transition -- no timing, no extra input, and
+                    // one pass through the screen answers it.
+                    if (EnvSet("PSZ_CC_SCAN"))
+                    {
+                        // The static block holding race, class and the widget
+                        // pointers, and a window of the appearance widget around
+                        // the cursor field. A mode flag has to live somewhere,
+                        // and these are the two places it plausibly lives.
+                        constexpr u32 kStatBase = 0x02156B00, kStatLen = 0x100;
+                        const u32 wBase = w + 0x5A00, wLen = 0x400;
+
+                        static u8 base[kStatLen + 0x400];
+                        static bool armed = false;
+                        static int logged = 0;
+
+                        auto grab = [&](u8* dst) {
+                            for (u32 i = 0; i < kStatLen; i++)
+                                dst[i] = (u8)Read(nds, kStatBase + i, 1);
+                            for (u32 i = 0; i < wLen; i++)
+                                dst[kStatLen + i] = (u8)Read(nds, wBase + i, 1);
+                        };
+
+                        if (cur == kCcRows - 1)     // parked on "Next Settings"
+                        {
+                            grab(base);
+                            armed = true;
+                            logged = 0;
+                        }
+                        else if (armed && logged < 40)
+                        {
+                            u8 now[kStatLen + 0x400];
+                            grab(now);
+                            for (u32 i = 0; i < kStatLen + wLen && logged < 40; i++)
+                            {
+                                if (now[i] == base[i]) continue;
+                                const u32 addr = (i < kStatLen) ? (kStatBase + i)
+                                                                : (wBase + (i - kStatLen));
+                                PszLog("cc scan %08X: %02X -> %02X%s",
+                                       addr, base[i], now[i],
+                                       (i < kStatLen) ? "  [static]" : "  [widget]");
+                                base[i] = now[i];       // report each byte once per value
+                                logged++;
+                            }
+                        }
+                    }
+
+                    // The narrower watch that came first. Kept because it costs
+                    // nothing and pins the two pointers we do know.
                     if (EnvSet("PSZ_CC_PROBE"))
                     {
                         static u32 last[6] = {0};
