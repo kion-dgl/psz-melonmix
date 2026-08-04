@@ -186,6 +186,32 @@ static constexpr u32 CcClassAddr  = 0x02156B5C;   // u8, 0..13, 0xFF unchosen
 static constexpr u32 CcWidgetCls  = 0x02156B30;   // set on class select
 static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 
+// NAME ENTRY. A word in overlay 11's own BSS: null on appearance, a heap pointer
+// on the name-entry screen.
+//
+// This is psz-re's measurement (unattended-backlog item E(a),
+// tools/charcreate.py::keyboard_slot_separates_name_entry), and it replaces the
+// cursor heuristic this file used to carry. That heuristic keyed on the cursor
+// reading 33 on one session's capture, and it simply does not reproduce: a full
+// pass of the appearance screen here read 0..6 and nothing else, so pressing
+// "Next Settings" left the sliders up and the keyboard unreachable.
+//
+// The obvious objection to this slot was raised and MEASURED away rather than
+// argued away, which is why it is trusted where the cursor was not.
+// FUN_0211E93C is a get-or-create -- read the word, return if non-null, else
+// allocate and store -- and a get-or-create is a cache, which would make this
+// "name entry has been VISITED" and useless. So it was tested by entering name
+// entry and backing out with B, screen-confirmed at all three points:
+//
+//     appearance (before)   0x00000000
+//     name entry            0x0226A600
+//     appearance (after B)  0x00000000     <- created on entry, destroyed on exit
+//
+// NOT CLAIMED, by psz-re or here: that the object IS the keyboard. Its
+// behaviour is measured and its identity is left open, and the behaviour is all
+// this needs.
+static constexpr u32 CcNameSlot   = 0x02124A64;
+
 // APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
 // confirmed by changing that option on device and re-reading, not by picking a
 // plausible byte off a difference list.
@@ -1179,6 +1205,15 @@ Frame Update(NDS* nds)
                        : Read(nds, CcWidgetCls, 4)      ? 2
                                                         : 0;
             if (f.ccRace < 0 || f.ccRace > 2) f.ccScreen = 0;
+
+            // Name entry keeps the appearance widget populated and its context
+            // block byte-identical, so it is 3 plus this slot rather than a
+            // screen of its own. psz-re's published rule orders the class-select
+            // pointer before the appearance one; the order here is the reverse
+            // and agrees on every state either has captured, because the class
+            // pointer is cleared on leaving that screen.
+            const bool nameEntry = (f.ccScreen == 3) && Read(nds, CcNameSlot, 4) != 0;
+
             if (f.ccScreen == 3)
             {
                 const u32 w = Read(nds, CcWidgetApp, 4);
@@ -1190,114 +1225,13 @@ Frame Update(NDS* nds)
                     const int cur = (int)Read(nds, w + CcCursorOff, 1);
                     f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
 
-                    // NAME ENTRY, provisionally. Pressing "Next Settings" leaves
-                    // every field psz-re and this build can reach identical to
-                    // the appearance screen -- that is Q6. But the cursor keeps
-                    // counting, and on name entry it read 33, far outside the
-                    // seven rows this screen has.
-                    //
-                    // So a cursor past the last row is taken as name entry,
-                    // which must show the BOTTOM screen because it is text
-                    // input. PROVISIONAL: if the keyboard's own cursor can sit
-                    // in 0..6 this misses, and a proper signal from Q6 should
-                    // replace it. Shipped anyway because the alternative is a
-                    // screen that is always wrong rather than usually right.
-                    //
-                    // LATCHED, because a single frame reading inside the row
-                    // range is not evidence of leaving name entry, and treating
-                    // it as such flips the keyboard away mid-keystroke. Backing
-                    // out to appearance looks the same for one frame as a
-                    // keyboard cursor passing through a low value, and only
-                    // duration separates them -- so it takes half a second of
-                    // real rows to let go. Entering stays instant: being late to
-                    // show the keyboard is worse than being late to hide it.
-                    static bool nameEntry = false;
-                    static int rowFrames = 0;
-                    if (cur >= kCcRows)          { nameEntry = true; rowFrames = 0; }
-                    else if (nameEntry && ++rowFrames > 30) { nameEntry = false; rowFrames = 0; }
-                    if (nameEntry) f.ccScreen = 4;
-
-                    // SCAN: find the signal rather than guess at it.
-                    //
-                    // PSZ_CC_PROBE watched five words and found nothing -- the
-                    // cursor only ever reads 0..6 and no pointer in the table
-                    // moves, so whatever marks name entry is somewhere this
-                    // project has not looked. Guessing a sixth address is how
-                    // the last guess got here.
-                    //
-                    // So: baseline two regions while the cursor sits on the last
-                    // row ("Next Settings", the row you press A on to leave),
-                    // then report every byte that changes afterwards. Pressing A
-                    // from there enters name entry, so the first thing this
-                    // prints IS the transition -- no timing, no extra input, and
-                    // one pass through the screen answers it.
-                    if (EnvSet("PSZ_CC_SCAN"))
-                    {
-                        // The static block holding race, class and the widget
-                        // pointers, and a window of the appearance widget around
-                        // the cursor field. A mode flag has to live somewhere,
-                        // and these are the two places it plausibly lives.
-                        constexpr u32 kStatBase = 0x02156B00, kStatLen = 0x100;
-                        const u32 wBase = w + 0x5A00, wLen = 0x400;
-
-                        static u8 base[kStatLen + 0x400];
-                        static bool armed = false;
-                        static int logged = 0;
-
-                        auto grab = [&](u8* dst) {
-                            for (u32 i = 0; i < kStatLen; i++)
-                                dst[i] = (u8)Read(nds, kStatBase + i, 1);
-                            for (u32 i = 0; i < wLen; i++)
-                                dst[kStatLen + i] = (u8)Read(nds, wBase + i, 1);
-                        };
-
-                        if (cur == kCcRows - 1)     // parked on "Next Settings"
-                        {
-                            grab(base);
-                            armed = true;
-                            logged = 0;
-                        }
-                        else if (armed && logged < 40)
-                        {
-                            u8 now[kStatLen + 0x400];
-                            grab(now);
-                            for (u32 i = 0; i < kStatLen + wLen && logged < 40; i++)
-                            {
-                                if (now[i] == base[i]) continue;
-                                const u32 addr = (i < kStatLen) ? (kStatBase + i)
-                                                                : (wBase + (i - kStatLen));
-                                PszLog("cc scan %08X: %02X -> %02X%s",
-                                       addr, base[i], now[i],
-                                       (i < kStatLen) ? "  [static]" : "  [widget]");
-                                base[i] = now[i];       // report each byte once per value
-                                logged++;
-                            }
-                        }
-                    }
-
-                    // The narrower watch that came first. Kept because it costs
-                    // nothing and pins the two pointers we do know.
-                    if (EnvSet("PSZ_CC_PROBE"))
-                    {
-                        static u32 last[6] = {0};
-                        const u32 now[6] = {
-                            (u32)cur,
-                            Read(nds, 0x02156B2C, 4), Read(nds, CcWidgetCls, 4),
-                            Read(nds, CcWidgetApp, 4), Read(nds, 0x02156B38, 4),
-                            Read(nds, 0x02156B3C, 4),
-                        };
-                        bool moved = false;
-                        for (int i = 0; i < 6; i++) if (now[i] != last[i]) moved = true;
-                        if (moved)
-                        {
-                            for (int i = 0; i < 6; i++) last[i] = now[i];
-                            PszLog("cc cursor=%u name=%d  B2C=%08X B30=%08X B34=%08X B38=%08X B3C=%08X",
-                                   now[0], nameEntry ? 1 : 0,
-                                   now[1], now[2], now[3], now[4], now[5]);
-                        }
-                    }
+                    // Name entry is separated from appearance by CcNameSlot,
+                    // measured -- see its declaration. The cursor heuristic that
+                    // used to live here, its latch, and the two probes that went
+                    // looking for a replacement are all gone with it.
                 }
             }
+            if (nameEntry) f.ccScreen = 4;
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 

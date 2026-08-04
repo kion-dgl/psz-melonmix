@@ -347,6 +347,20 @@ small concession and is actually the removal of the thing these screens exist fo
 `PSZ_CC_BOTTOM` and the SELECT toggle are escape hatches for when detection fails,
 not a way of working.
 
+**Name entry is detected by `0x02124A64`**, a word in `ov11`'s BSS: null on
+appearance, a heap pointer on the name-entry screen. psz-re's measurement
+(unattended-backlog item E(a)), and it replaced a heuristic of ours that keyed on
+the cursor reading 33 — which did not reproduce here at all, the cursor reading
+0..6 and nothing else across a full pass, which is exactly why pressing "Next
+Settings" used to leave the sliders up with the keyboard unreachable.
+
+What makes the slot trustworthy where the cursor was not is that its own worst
+objection was measured rather than argued. `FUN_0211E93C` is a get-or-create, and
+a get-or-create is a cache — a cache would stay set after the screen closed and
+report "name entry has been *visited*". So it was tested by entering name entry
+and backing out with B, screen-confirmed at all three points: `0`, a pointer, `0`
+again. Created on entry, destroyed on exit.
+
 **A psz-re claim is contradicted by this.** `docs/game-state.md` says under Traps:
 "The title screen runs with the bottom screen off, while file select uses both",
 and offers reading the display control registers as a way to separate the
