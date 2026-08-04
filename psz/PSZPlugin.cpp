@@ -1798,7 +1798,7 @@ static void DrawAppearance(u32* dst, const Frame& f)
 {
     const CcOption* opts = CcOptionsFor(f.ccRace);
     const int h = 15, gap = 2, w = 84;
-    const int total = 6 * h + 5 * gap;
+    const int total = kCcRows * h + (kCcRows - 1) * gap;
     const int y0 = (192 - total) / 2;
     for (int i = 0; i < 6; i++)
     {
@@ -1820,13 +1820,32 @@ static void DrawAppearance(u32* dst, const Frame& f)
         DrawText(dst, cnt, 6 + w - tw - 7, y + (h - kGlyphH) / 2, 0x40D0FF);
     }
 
-    // Voice is the one option with an audible preview, and the prompt for it
-    // lives on the bottom screen the player cannot see.
+    // "Next Settings" is a row like any other and the cursor lands on it, so it
+    // has to be visible or the player cannot see what they are about to press.
+    {
+        const bool on = (f.ccCursor == 6);
+        const int y = y0 + 6 * (h + gap);
+        DrawPlate(dst, 6, y, w, h);
+        if (on)
+            for (int py = y + 2; py < y + h - 2; py++)
+                for (int px = 8; px < 10; px++)
+                    if (py >= 0 && py < 192) dst[py * 256 + px] = 0xFF40D0FF;
+        DrawText(dst, "Next", 6 + 7, y + (h - kGlyphH) / 2,
+                 on ? 0xFFFFFF : 0x9098A0);
+    }
+
+    // Voice is the one option with an audible preview, and its prompt lives on
+    // the bottom screen the player cannot see. Top-right, away from the list,
+    // and only while the cursor is actually on Voice -- a permanent hint for a
+    // conditional action is the clutter this HUD keeps removing.
     if (f.ccCursor == 4)
     {
-        const int y = y0 + 6 * (h + gap) + 2;
-        DrawPlate(dst, 6, y, w, h);
-        DrawText(dst, "Y: hear", 6 + 7, y + (h - kGlyphH) / 2, 0xFFFFFF);
+        const char* t = "Y: hear";
+        const int tw = (int)std::strlen(t) * kGlyphW;
+        const int pw = tw + 14, ph = kGlyphH + 8;
+        const int x = 256 - pw - 6, y = 6;
+        DrawPlate(dst, x, y, pw, ph);
+        DrawText(dst, t, x + 7, y + 4, 0xFFFFFF);
     }
 }
 
