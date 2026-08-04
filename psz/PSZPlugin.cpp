@@ -195,6 +195,17 @@ static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 // screen -- and the run is not contiguous, since +0x0D and +0x0F belong to
 // something else.
 struct CcOption { const char* name; int off; int count; };
+// The cursor -- which row the player is on. Found by taking three captures one
+// Down press apart: exactly ONE byte in all of main RAM read 0, 1, 2 across
+// them, and it then matched rows 3, 4 and 5 in captures it was not fitted to.
+//
+// Reached as an offset from the widget rather than as a constant, since the
+// widget itself is only reachable through the fixed pointer.
+static constexpr u32 CcCursorOff = 0x5C68;
+
+// Seven rows: six options and "Next Settings".
+static constexpr int kCcRows = 7;
+
 static const CcOption kCcOptions[6] = {
     { "Head Type",     0x09, 4 },
     { "Hair Color",    0x0A, 3 },
@@ -535,6 +546,7 @@ static bool OverlayWantsBottomScreen(int ov)
     case 6:    // ending / credits
         return false;
     case 11:   // character create -- the top screen is the character preview,
+               // EXCEPT name entry, which is handled by ccScreen == 4 below.
                // the bottom is the sliders. The preview is the thing worth
                // seeing; our own sliders replace the bottom screen later.
         return false;
@@ -1103,10 +1115,38 @@ Frame Update(NDS* nds)
             {
                 const u32 w = Read(nds, CcWidgetApp, 4);
                 if (InMainRAM(nds, w))
+                {
                     for (int i = 0; i < 6; i++)
                         f.ccOpt[i] = (int)Read(nds, w + kCcOptions[i].off, 1);
+
+                    const int cur = (int)Read(nds, w + CcCursorOff, 1);
+                    f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
+
+                    // NAME ENTRY, provisionally. Pressing "Next Settings" leaves
+                    // every field psz-re and this build can reach identical to
+                    // the appearance screen -- that is Q6. But the cursor keeps
+                    // counting, and on name entry it read 33, far outside the
+                    // seven rows this screen has.
+                    //
+                    // So a cursor past the last row is taken as name entry,
+                    // which must show the BOTTOM screen because it is text
+                    // input. PROVISIONAL: if the keyboard's own cursor can sit
+                    // in 0..6 this misses, and a proper signal from Q6 should
+                    // replace it. Shipped anyway because the alternative is a
+                    // screen that is always wrong rather than usually right.
+                    if (cur >= kCcRows) f.ccScreen = 4;
+                }
             }
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
+        }
+
+        // Name entry is text input; it needs the game's own keyboard.
+        if (f.ccScreen == 4)
+        {
+            f.active = true;
+            f.modal = true;
+            LogFrame(f, heldOv, inGame, menuShown);
+            return f;
         }
 
         if (booting ||
@@ -1726,8 +1766,14 @@ static void DrawAppearance(u32* dst, const Frame& f)
     for (int i = 0; i < 6; i++)
     {
         const int y = y0 + i * (h + gap);
+        const bool on = (f.ccCursor == i);
         DrawPlate(dst, 6, y, w, h);
-        DrawText(dst, kCcOptions[i].name, 6 + 7, y + (h - kGlyphH) / 2, 0xFFFFFF);
+        if (on)
+            for (int py = y + 2; py < y + h - 2; py++)
+                for (int px = 8; px < 10; px++)
+                    if (py >= 0 && py < 192) dst[py * 256 + px] = 0xFF40D0FF;
+        DrawText(dst, kCcOptions[i].name, 6 + 7, y + (h - kGlyphH) / 2,
+                 on ? 0xFFFFFF : 0x9098A0);
 
         char cnt[16];
         const int v = f.ccOpt[i];

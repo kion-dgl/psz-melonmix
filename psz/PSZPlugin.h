@@ -105,6 +105,7 @@ struct Frame
     int ccRace = -1;        // 0..2
     int ccClass = -1;       // global code 0..13, -1 when unchosen
     int ccOpt[6] = { -1, -1, -1, -1, -1, -1 };   // appearance option indices
+    int ccCursor = -1;      // which row the player is on, 0..6
 
     bool areaMap = false;       // the centred translucent grid is showing
     int roomCount = 0;
