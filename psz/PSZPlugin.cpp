@@ -194,26 +194,52 @@ static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 // is NOT screen order -- Skin sits before Costume in memory and after it on
 // screen -- and the run is not contiguous, since +0x0D and +0x0F belong to
 // something else.
-struct CcOption { const char* name; int off; int count; };
 // The cursor -- which row the player is on. Found by taking three captures one
 // Down press apart: exactly ONE byte in all of main RAM read 0, 1, 2 across
 // them, and it then matched rows 3, 4 and 5 in captures it was not fitted to.
-//
-// Reached as an offset from the widget rather than as a constant, since the
-// widget itself is only reachable through the fixed pointer.
+// Reached as an offset from the widget, which is itself only reachable through
+// the fixed pointer.
 static constexpr u32 CcCursorOff = 0x5C68;
 
 // Seven rows: six options and "Next Settings".
 static constexpr int kCcRows = 7;
 
-static const CcOption kCcOptions[6] = {
-    { "Head Type",     0x09, 4 },
-    { "Hair Color",    0x0A, 3 },
-    { "Costume Color", 0x0C, 5 },
-    { "Skin Tone",     0x0B, 3 },
-    { "Voice Type",    0x0E, 8 },
-    { "Mag Color",     0x10, 5 },
+struct CcOption { const char* name; int off; int count; };
+
+// NAMES DIFFER BY RACE. kion, from the device: a cast reads "Head Parts",
+// "Body Color A/B/C", "Voice Type", "Mag Color" where a human reads "Head
+// Type", "Hair Color", "Costume Color", "Skin Tone". Showing the human set on
+// a cast was simply wrong.
+//
+// Abbreviated because the full names pushed the panel into the middle of the
+// screen, where the character preview is. Short labels were kion's call for
+// this pass; widening the panel would cover the thing it sits beside.
+//
+// Offsets and counts were measured on a HUMAN. Cast is assumed to share the
+// layout -- the counts match (4/3/5/3/8/5) and the screen order is the same --
+// but that is inference, not measurement.
+static const CcOption kCcOptionsOrganic[6] = {
+    { "Head",  0x09, 4 },
+    { "Hair",  0x0A, 3 },
+    { "Suit",  0x0C, 5 },
+    { "Skin",  0x0B, 3 },
+    { "Voice", 0x0E, 8 },
+    { "Mag",   0x10, 5 },
 };
+static const CcOption kCcOptionsCast[6] = {
+    { "Head",  0x09, 4 },
+    { "Clr A", 0x0A, 3 },
+    { "Clr B", 0x0C, 5 },
+    { "Clr C", 0x0B, 3 },
+    { "Voice", 0x0E, 8 },
+    { "Mag",   0x10, 5 },
+};
+
+// race 2 is cast; 0 human and 1 newman share the organic labels.
+static const CcOption* CcOptionsFor(int race)
+{
+    return (race == 2) ? kCcOptionsCast : kCcOptionsOrganic;
+}
 
 // One plate colour for every drawn panel. The readout and the info box are the
 // same UI and looked it only by coincidence before; this makes it structural.
@@ -1127,7 +1153,7 @@ Frame Update(NDS* nds)
                 if (InMainRAM(nds, w))
                 {
                     for (int i = 0; i < 6; i++)
-                        f.ccOpt[i] = (int)Read(nds, w + kCcOptions[i].off, 1);
+                        f.ccOpt[i] = (int)Read(nds, w + CcOptionsFor(f.ccRace)[i].off, 1);
 
                     const int cur = (int)Read(nds, w + CcCursorOff, 1);
                     f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
@@ -1770,7 +1796,8 @@ static void DrawLeftList(u32* dst, const char* const* items, int n, int selected
 // what they need -- "1/4" -- not a bar.
 static void DrawAppearance(u32* dst, const Frame& f)
 {
-    const int h = 15, gap = 2, w = 128;
+    const CcOption* opts = CcOptionsFor(f.ccRace);
+    const int h = 15, gap = 2, w = 84;
     const int total = 6 * h + 5 * gap;
     const int y0 = (192 - total) / 2;
     for (int i = 0; i < 6; i++)
@@ -1782,15 +1809,24 @@ static void DrawAppearance(u32* dst, const Frame& f)
             for (int py = y + 2; py < y + h - 2; py++)
                 for (int px = 8; px < 10; px++)
                     if (py >= 0 && py < 192) dst[py * 256 + px] = 0xFF40D0FF;
-        DrawText(dst, kCcOptions[i].name, 6 + 7, y + (h - kGlyphH) / 2,
+        DrawText(dst, opts[i].name, 6 + 7, y + (h - kGlyphH) / 2,
                  on ? 0xFFFFFF : 0x9098A0);
 
         char cnt[16];
         const int v = f.ccOpt[i];
         std::snprintf(cnt, sizeof(cnt), "%d/%d",
-                      (v >= 0 ? v + 1 : 1), kCcOptions[i].count);
+                      (v >= 0 ? v + 1 : 1), opts[i].count);
         const int tw = (int)std::strlen(cnt) * kGlyphW;
         DrawText(dst, cnt, 6 + w - tw - 7, y + (h - kGlyphH) / 2, 0x40D0FF);
+    }
+
+    // Voice is the one option with an audible preview, and the prompt for it
+    // lives on the bottom screen the player cannot see.
+    if (f.ccCursor == 4)
+    {
+        const int y = y0 + 6 * (h + gap) + 2;
+        DrawPlate(dst, 6, y, w, h);
+        DrawText(dst, "Y: hear", 6 + 7, y + (h - kGlyphH) / 2, 0xFFFFFF);
     }
 }
 
