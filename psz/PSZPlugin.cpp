@@ -628,6 +628,36 @@ static bool ServiceAreaMapToggle(NDS* nds)
     return shown || EnvSet("PSZ_HUD_AREAMAP");
 }
 
+// SELECT during character create presents the bottom screen, whatever the name
+// entry test below believes.
+//
+// That test is provisional (Q6) and it is the only thing standing between the
+// player and the game's keyboard: get it wrong and name entry is a screen you
+// cannot see, on the one screen of the game you cannot skip. kion hit exactly
+// that and could not reach gameplay at all.
+//
+// So this is not a convenience toggle. It is the guarantee that no failure of a
+// heuristic can leave the player stuck, and it wants to keep working even after
+// the heuristic is made exact.
+static bool ServiceCcBottomToggle(NDS* nds, bool inCreate)
+{
+    static bool shown = false, prev = false;
+    if (!inCreate)
+    {
+        // Leaving create clears it, so the next character does not begin with
+        // the bottom screen already forced on from the last one.
+        shown = false; prev = false;
+        return false;
+    }
+    const bool held = !(nds->KeyInput & (1 << 2));
+    if (held && !prev) shown = !shown;
+    prev = held;
+    // PSZ_CC_BOTTOM pins it on. Belt and braces: SELECT is only known to be
+    // unused in the FIELD, and if character create turns out to consume it the
+    // key toggle is no escape hatch at all -- so there is one that needs no key.
+    return shown || EnvSet("PSZ_CC_BOTTOM");
+}
+
 static void ReadRooms(NDS* nds, Frame& f)
 {
     u32 root = Read(nds, RoomRoot, 4);
@@ -1137,6 +1167,8 @@ Frame Update(NDS* nds)
         // content. Draw nothing and let it through untouched.
         // Character create: read the state the game keeps at fixed addresses,
         // so the screens can be drawn rather than clipped.
+        const bool forceBottom = ServiceCcBottomToggle(nds, effectiveOverlay == 11);
+
         if (effectiveOverlay == 11)
         {
             const u32 cls = Read(nds, CcClassAddr, 1);
@@ -1170,15 +1202,56 @@ Frame Update(NDS* nds)
                     // in 0..6 this misses, and a proper signal from Q6 should
                     // replace it. Shipped anyway because the alternative is a
                     // screen that is always wrong rather than usually right.
-                    if (cur >= kCcRows) f.ccScreen = 4;
+                    //
+                    // LATCHED, because a single frame reading inside the row
+                    // range is not evidence of leaving name entry, and treating
+                    // it as such flips the keyboard away mid-keystroke. Backing
+                    // out to appearance looks the same for one frame as a
+                    // keyboard cursor passing through a low value, and only
+                    // duration separates them -- so it takes half a second of
+                    // real rows to let go. Entering stays instant: being late to
+                    // show the keyboard is worse than being late to hide it.
+                    static bool nameEntry = false;
+                    static int rowFrames = 0;
+                    if (cur >= kCcRows)          { nameEntry = true; rowFrames = 0; }
+                    else if (nameEntry && ++rowFrames > 30) { nameEntry = false; rowFrames = 0; }
+                    if (nameEntry) f.ccScreen = 4;
+
+                    // The measurement that would settle Q6. Every candidate in
+                    // the widget table around the two pointers we know, plus the
+                    // cursor, logged when any of them moves -- so one pass
+                    // through name entry says which word is the real signal and
+                    // this heuristic can be deleted rather than tuned.
+                    if (EnvSet("PSZ_CC_PROBE"))
+                    {
+                        static u32 last[6] = {0};
+                        const u32 now[6] = {
+                            (u32)cur,
+                            Read(nds, 0x02156B2C, 4), Read(nds, CcWidgetCls, 4),
+                            Read(nds, CcWidgetApp, 4), Read(nds, 0x02156B38, 4),
+                            Read(nds, 0x02156B3C, 4),
+                        };
+                        bool moved = false;
+                        for (int i = 0; i < 6; i++) if (now[i] != last[i]) moved = true;
+                        if (moved)
+                        {
+                            for (int i = 0; i < 6; i++) last[i] = now[i];
+                            PszLog("cc cursor=%u name=%d  B2C=%08X B30=%08X B34=%08X B38=%08X B3C=%08X",
+                                   now[0], nameEntry ? 1 : 0,
+                                   now[1], now[2], now[3], now[4], now[5]);
+                        }
+                    }
                 }
             }
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
-        // Name entry is text input; it needs the game's own keyboard.
-        if (f.ccScreen == 4)
+        // Name entry is text input; it needs the game's own keyboard. SELECT
+        // gets here too, so a missed detection is recoverable by the player
+        // rather than terminal.
+        if (f.ccScreen == 4 || forceBottom)
         {
+            f.ccScreen = 4;
             f.active = true;
             f.modal = true;
             LogFrame(f, heldOv, inGame, menuShown);
