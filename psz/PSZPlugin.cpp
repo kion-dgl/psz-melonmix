@@ -186,6 +186,24 @@ static constexpr u32 CcClassAddr  = 0x02156B5C;   // u8, 0..13, 0xFF unchosen
 static constexpr u32 CcWidgetCls  = 0x02156B30;   // set on class select
 static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 
+// APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
+// confirmed by changing that option on device and re-reading, not by picking a
+// plausible byte off a difference list.
+//
+// Two things a reader would otherwise assume and be wrong about: memory order
+// is NOT screen order -- Skin sits before Costume in memory and after it on
+// screen -- and the run is not contiguous, since +0x0D and +0x0F belong to
+// something else.
+struct CcOption { const char* name; int off; int count; };
+static const CcOption kCcOptions[6] = {
+    { "Head Type",     0x09, 4 },
+    { "Hair Color",    0x0A, 3 },
+    { "Costume Color", 0x0C, 5 },
+    { "Skin Tone",     0x0B, 3 },
+    { "Voice Type",    0x0E, 8 },
+    { "Mag Color",     0x10, 5 },
+};
+
 // One plate colour for every drawn panel. The readout and the info box are the
 // same UI and looked it only by coincidence before; this makes it structural.
 static constexpr u32 kPlateRGBA = 0xD0101820u;
@@ -1081,7 +1099,14 @@ Frame Update(NDS* nds)
                        : Read(nds, CcWidgetCls, 4)      ? 2
                                                         : 0;
             if (f.ccRace < 0 || f.ccRace > 2) f.ccScreen = 0;
-            if (f.ccScreen == 1 || f.ccScreen == 2) f.active = true;
+            if (f.ccScreen == 3)
+            {
+                const u32 w = Read(nds, CcWidgetApp, 4);
+                if (InMainRAM(nds, w))
+                    for (int i = 0; i < 6; i++)
+                        f.ccOpt[i] = (int)Read(nds, w + kCcOptions[i].off, 1);
+            }
+            if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
         if (booting ||
@@ -1690,6 +1715,29 @@ static void DrawLeftList(u32* dst, const char* const* items, int n, int selected
         DrawListRow(dst, 6, y0 + i * (h + gap), w, h, items[i], i == selected);
 }
 
+// APPEARANCE: the six option pickers, in SCREEN order, each showing where it
+// sits in its own range. They are discrete left/right pickers, so a count is
+// what they need -- "1/4" -- not a bar.
+static void DrawAppearance(u32* dst, const Frame& f)
+{
+    const int h = 15, gap = 2, w = 128;
+    const int total = 6 * h + 5 * gap;
+    const int y0 = (192 - total) / 2;
+    for (int i = 0; i < 6; i++)
+    {
+        const int y = y0 + i * (h + gap);
+        DrawPlate(dst, 6, y, w, h);
+        DrawText(dst, kCcOptions[i].name, 6 + 7, y + (h - kGlyphH) / 2, 0xFFFFFF);
+
+        char cnt[16];
+        const int v = f.ccOpt[i];
+        std::snprintf(cnt, sizeof(cnt), "%d/%d",
+                      (v >= 0 ? v + 1 : 1), kCcOptions[i].count);
+        const int tw = (int)std::strlen(cnt) * kGlyphW;
+        DrawText(dst, cnt, 6 + w - tw - 7, y + (h - kGlyphH) / 2, 0x40D0FF);
+    }
+}
+
 // RACE: human, cast, newman -- the order the game shows them.
 static void DrawRaceSelect(u32* dst, const Frame& f)
 {
@@ -1715,7 +1763,7 @@ bool RenderArtLayer(u32* out, const Frame& f)
     const bool wantPanel = !f.modal && f.panel;
     const bool wantInfo  = !f.modal && f.info[0];
     const bool wantPal   = !f.modal && f.palette;
-    const bool wantCc    = f.ccScreen == 1 || f.ccScreen == 2;
+    const bool wantCc    = f.ccScreen >= 1 && f.ccScreen <= 3;
     if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc) return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
@@ -1726,6 +1774,7 @@ bool RenderArtLayer(u32* out, const Frame& f)
     // bottom screen -- see Frame::cuts.
     if (f.ccScreen == 1) DrawRaceSelect(out, f);
     if (f.ccScreen == 2) DrawClassSelect(out, f);
+    if (f.ccScreen == 3) DrawAppearance(out, f);
     if (wantPal && UseArtHud())
         BlitArt(out, kArt_palette, (int)(f.px * 256), (int)(f.py * 192),
                 (int)(f.pw * 256), (int)(f.ph * 192));
