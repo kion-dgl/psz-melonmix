@@ -1304,7 +1304,14 @@ Frame Update(NDS* nds)
         // Name entry is text input; it needs the game's own keyboard. SELECT
         // gets here too, so a missed detection is recoverable by the player
         // rather than terminal.
-        if (f.ccScreen == 4 || forceBottom)
+        //
+        // The escape hatch is scoped to the APPEARANCE screen. Applied to all of
+        // character create it took the bottom screen over race and class select
+        // as well, which draw correctly from our own art and were never the
+        // problem -- it fixed the screen that was broken by breaking two that
+        // worked. Name entry keeps the appearance widget live, so ccScreen still
+        // reads 3 there and this still reaches it.
+        if (f.ccScreen == 4 || (forceBottom && f.ccScreen == 3))
         {
             f.ccScreen = 4;
             f.active = true;
