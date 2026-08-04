@@ -1,5 +1,5 @@
 diff --git a/app/src/main/cpp/MelonDSAndroidJNI.cpp b/app/src/main/cpp/MelonDSAndroidJNI.cpp
-index 11f81f90..95aca22f 100644
+index 11f81f90..775c7800 100644
 --- a/app/src/main/cpp/MelonDSAndroidJNI.cpp
 +++ b/app/src/main/cpp/MelonDSAndroidJNI.cpp
 @@ -1,3 +1,5 @@
@@ -8,20 +8,11 @@ index 11f81f90..95aca22f 100644
  #include <EGL/egl.h>
  #include <EGL/eglext.h>
  #include <jni.h>
-@@ -76,6 +78,38 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
+@@ -75,7 +77,33 @@ Java_me_magnum_melonds_MelonEmulator_setupEmulator(JNIEnv* env, jobject thiz, jo
+     paused = false;
  }
  
- JNIEXPORT void JNICALL
-+Java_me_magnum_melonds_MelonEmulator_pszLogAxes(JNIEnv* env, jobject thiz,
-+        jfloat x, jfloat y, jfloat hx, jfloat hy, jfloat rz)
-+{
-+    static int n = 0;
-+    if ((n++ % 20) == 0)
-+        __android_log_print(4, "psz-melonmix",
-+            "AXES x=%.2f y=%.2f hat=(%.2f,%.2f) rz=%.2f", (double)x, (double)y,
-+            (double)hx, (double)hy, (double)rz);
-+}
-+
+-JNIEXPORT void JNICALL
 +extern "C" JNIEXPORT void JNICALL
 +Java_me_magnum_melonds_MelonEmulator_pszSetMoveStick(JNIEnv* env, jobject thiz, jfloat x, jfloat y)
 +{
@@ -37,9 +28,14 @@ index 11f81f90..95aca22f 100644
 +    // Logged so a dead stick can be told apart from a dead native call: if this
 +    // never appears, the axis is not reaching Kotlin; if it appears and the
 +    // camera still does not move, the problem is downstream.
-+    static int n = 0;
-+    if ((n++ % 30) == 0)
-+        __android_log_print(4, "psz-melonmix", "JNI stick=%.3f", (double) x);
++    // Diagnostic only on request: unconditional logging spams logcat in a
++    // shipped build, and it has already served its purpose.
++    if (getenv("PSZ_CAM_DEBUG"))
++    {
++        static int n = 0;
++        if ((n++ % 30) == 0)
++            __android_log_print(4, "psz-melonmix", "JNI stick=%.3f", (double) x);
++    }
 +    PSZMix::SetCameraStick((float) x);
 +}
 +
@@ -48,10 +44,10 @@ index 11f81f90..95aca22f 100644
  {
      jsize cheatCount = env->GetArrayLength(cheats);
 diff --git a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
-index 1c7857c6..921ac970 100644
+index 1c7857c6..0f4734e6 100644
 --- a/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
 +++ b/app/src/main/java/me/magnum/melonds/MelonEmulator.kt
-@@ -51,6 +51,15 @@ object MelonEmulator {
+@@ -51,6 +51,12 @@ object MelonEmulator {
          screenshotBuffer: ByteBuffer,
      )
  
@@ -61,14 +57,11 @@ index 1c7857c6..921ac970 100644
 +    // psz-melonmix: left-stick vector, for analog movement direction.
 +    external fun pszSetMoveStick(x: Float, y: Float)
 +
-+    // Diagnostic: report every axis a motion event carries.
-+    external fun pszLogAxes(x: Float, y: Float, hx: Float, hy: Float, rz: Float)
-+
      external fun setupCheats(cheats: Array<Cheat>)
  
      external fun setupAchievements(achievements: Array<RASimpleAchievement>, leaderboards: Array<RASimpleLeaderboard>, richPresenceScript: String?)
 diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
-index 9cc7d414..08987d48 100644
+index 9cc7d414..146e2dbe 100644
 --- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 +++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
 @@ -10,6 +10,7 @@ import android.os.Bundle
@@ -79,7 +72,7 @@ index 9cc7d414..08987d48 100644
  import android.view.MotionEvent
  import android.view.View
  import android.view.ViewGroup
-@@ -875,6 +876,38 @@ class EmulatorActivity : AppCompatActivity() {
+@@ -875,6 +876,30 @@ class EmulatorActivity : AppCompatActivity() {
      }
  
      override fun dispatchGenericMotionEvent(event: MotionEvent): Boolean {
@@ -99,20 +92,12 @@ index 9cc7d414..08987d48 100644
 +            // Left stick, raw. melonDS maps it onto d-pad bits, which is where
 +            // the direction resolution is lost; the plugin uses the true vector
 +            // to correct the heading afterwards.
-+            // AXIS_X/Y read zero on the Retroid even while the stick is
-+            // clearly driving the game, so the left stick is not arriving as an
-+            // axis. HAT_X/Y is the other way a stick reaches an app -- digital,
-+            // so it buys no analog resolution, but knowing WHICH one carries
-+            // the input decides whether analog is reachable at all. Both are
-+            // logged so the answer comes from data.
++            // The left stick DOES arrive as AXIS_X/Y -- an earlier reading of
++            // zero came from a stale APK, not from the device. The hat fallback
++            // and the axis probe that established this are removed.
 +            val lx = event.getAxisValue(MotionEvent.AXIS_X)
 +            val ly = event.getAxisValue(MotionEvent.AXIS_Y)
-+            val hx = event.getAxisValue(MotionEvent.AXIS_HAT_X)
-+            val hy = event.getAxisValue(MotionEvent.AXIS_HAT_Y)
-+            val rzv = event.getAxisValue(MotionEvent.AXIS_RZ)
-+            MelonEmulator.pszSetMoveStick(if (lx != 0f) lx else hx,
-+                                          if (ly != 0f) ly else hy)
-+            MelonEmulator.pszLogAxes(lx, ly, hx, hy, rzv)
++            MelonEmulator.pszSetMoveStick(lx, ly)
 +        }
 +
          if (!activeOverlays.hasActiveOverlays() && nativeInputListener.onMotionEvent(event))
