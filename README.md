@@ -20,10 +20,11 @@ the top screen: the player panel, the room minimap (with its key counter), the
 locked-on target's name and attribute, and the action palette.
 
 In menus, shops, the quest counter, the title and file select, the bottom screen
-*is* the interaction — so it is presented whole instead, at 66% with a light dim,
-which leaves the top screen readable around it. Those screens are split scenes:
-character create puts its race description on the top screen, the quest counter
-its "Select an area." prompt.
+*is* the interaction — so it is presented whole instead, filling the screen.
+Those screens are split scenes: character create puts its race description on the
+top screen, the quest counter its "Select an area." prompt, the title its logo.
+What the top screen carried is drawn back over the menu from our own art, so
+nothing is lost by giving the menu the whole display.
 
 Other bits: 16:9 widescreen (the projection term, not a stretch), SELECT toggles
 a translucent area map drawn from the game's own room table, and the target box
@@ -44,10 +45,32 @@ being reimplemented or needing the game's internals to be understood first.
 ANDROID_HOME=~/Android/Sdk ./scripts/build-android.sh
 ```
 
-Desktop options are environment variables: `PSZ_TOPONLY=1` for the single-screen
-view, `PSZ_COMPARE=1` to put it beside the untouched bottom screen, plus
-`PSZ_WIDESCREEN=1`, `PSZ_HUD_SCALE`, `PSZ_MODAL_SCALE`, and per-element source
-rects (`PSZ_HUD_MAPRECT="x,y,w,h"` and friends) for retuning without a rebuild.
+Linux deps are listed at the top of `scripts/build-desktop.sh`; Windows uses
+MSYS2 and CI has the package list. On macOS:
+
+```sh
+brew install qt pkgconf libarchive faad2 enet sdl2 zstd cmake ninja
+export PKG_CONFIG_PATH="$(brew --prefix libarchive)/lib/pkgconfig"   # keg-only
+./scripts/build-desktop.sh          # -> build/melonDS/build/melonDS.app
+```
+
+Qt builds an app bundle there, so the binary is inside it at
+`melonDS.app/Contents/MacOS/melonDS` rather than at the path the script prints.
+macOS is not in CI, so it is built by hand and can break without anything saying
+so.
+
+The single-screen 16:9 view and the widescreen cheat are on by default — there is
+nothing to turn on to get the view this build exists for. Environment variables
+retune it without a rebuild:
+
+| | |
+|---|---|
+| `PSZ_MODAL_SCALE` | menus fill the screen; below 1 insets them, `PSZ_MODAL_DIM` behind |
+| `PSZ_HUD_ELEMENT_SCALE` | size of the ported corner elements |
+| `PSZ_HUD_ART` | draw the player panel and palette from our art instead of clipping them |
+| `PSZ_MAP_OPACITY`, `PSZ_HUD_AREAMAP` | the SELECT area map |
+| `PSZ_CHEAT_WIDESCREEN=0` | back to 4:3 |
+| `PSZ_HUD_MAPRECT="x,y,w,h"` and friends | per-element source rects |
 
 ## How it is put together
 

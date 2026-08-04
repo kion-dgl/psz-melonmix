@@ -33,11 +33,21 @@ job). Read memory only for scene detection and the controller hacks.
       on the display at all, so a shop or the quest counter had nothing to
       interact with. Now the corner overlay is replaced by the bottom screen
       itself, centred and scaled to 88% of screen height, over a dimmed field.
-      `PSZ_HUD_NOMODAL=1` disables it. **Sized at 66% with a light dim
-      (`PSZ_MODAL_SCALE`, `PSZ_MODAL_DIM`)** so the top screen stays readable
-      around it — the PSO-style first pass. Verified on character create: the
-      "Create Character" heading, the race description and the character art are
-      all legible at once with the menu centred, where an 88% modal buried them.
+      `PSZ_HUD_NOMODAL=1` disables it. Then **sized at 66% with a light dim
+      (`PSZ_MODAL_SCALE`, `PSZ_MODAL_DIM`)** so the top screen stayed readable
+      around it — the PSO-style pass. Verified on character create: the "Create
+      Character" heading, the race description and the character art were all
+      legible at once with the menu centred, where an 88% modal buried them.
+
+      **Now full-screen again, and the reasoning inverted.** The top-screen
+      content those insets were protecting is not the game's top screen at all —
+      it is OUR art, drawn by `RenderArtLayer` into the modal's own space: the
+      title logo, the character-create panels. So the inset was shrinking the
+      thing it existed to make room for, and the desktop and Android builds
+      disagreed about what a menu looks like. Android was already full-screen
+      (`Composite` copies the bottom framebuffer over the top one outright), so
+      full-screen is now both paths. `PSZ_MODAL_SCALE` below 1 restores the
+      inset.
 
   The test needs no overlay images and no new RE: the player object pointer
   `*(0x02108D04)` is NULL in every mode that is not the main game — which covers
@@ -91,15 +101,27 @@ job). Read memory only for scene detection and the controller hacks.
       the top screen's on-screen rect and sized in real pixels, resolution
       genuinely buys room. `PSZ_HUD_SCALE` (default 2.0) trades element size
       against it directly.
+
+      **Superseded.** Placement now comes from `PSZMix::PlaceElement`, which
+      returns fractions of the top screen so the DS compositor, the Qt path and
+      both GL paths scale ONE layout definition into their own space. Sizing in
+      window pixels was a fourth answer, and it could not line up with the art
+      layer, which is positioned in DS space. `PSZ_HUD_ELEMENT_SCALE` is the size
+      control; `PSZ_HUD_SCALE` no longer moves anything.
 - [x] **Compare mode** — `PSZ_COMPARE=1` puts the 16:9 top screen beside the
       bottom screen, so a ported element can be checked against the original it
       was copied from in the same frame. `PSZ_TOPONLY=1` remains the
       single-screen goal. Both default to a 1920x1080 display.
+
+      **Both flags are gone.** Single-screen 16:9 became the default in
+      `Config.cpp` (`ScreenSizing=4`, `ScreenAspectTop=1`) rather than something
+      to switch on, and compare mode went with the harness it was built for.
 - [x] **16:9 widescreen** — `PSZ_WIDESCREEN=1`. From the cheat DB's "16:9
       Widescreen": if the u16 at `0x020346E0` is `0x1555`, write `0x1C71`.
       7281/5461 = 1.3333, exactly 16:9 over 4:3, so that value is the 3D
       projection's aspect term. Applied per frame the way an AR code would be,
-      so no cheat-file wiring is needed.
+      so no cheat-file wiring is needed. Now on by default as a quality-of-life
+      cheat; `PSZ_CHEAT_WIDESCREEN=0` turns it off.
 - [x] **Single-screen presentation** — `PSZ_TOPONLY=1` sets `ScreenSizing=4`
       (TopOnly) and `ScreenAspectTop=1` (16:9), widens Xvfb to 1280x720 and
       **resizes the window explicitly**. Fullscreen is only a request and there

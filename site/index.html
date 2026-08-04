@@ -137,10 +137,11 @@ valid there, which was checked rather than assumed.</p>
 </table>
 </div>
 
-<p>Source rects are in bottom-screen pixels (256×192). Elements are drawn at
-<code>PSZ_HUD_SCALE</code> (default 2.0) in <em>window</em> pixels, not DS pixels
-— so raising the output resolution gives them a smaller share of the screen
-rather than scaling them up with it.</p>
+<p>Source rects are in bottom-screen pixels (256×192). Where each one lands comes
+from <code>PSZMix::PlaceElement</code>, as a fraction of the top screen, so the
+DS-resolution compositor, the desktop paths and the Android one all scale one
+layout definition into their own space rather than each doing its own corner
+arithmetic. <code>PSZ_HUD_ELEMENT_SCALE</code> is the size control.</p>
 
 <h3>The target box hides itself</h3>
 <p>The game draws that box whether or not anything is locked on, and there is no
@@ -160,15 +161,18 @@ confirmed both ways, in a field and in town.</p>
   <figcaption>Quest counter (<code>ov12</code>) — the same overlay hosts the shop.</figcaption>
 </figure>
 
-<p><strong>Expected:</strong> the corner elements disappear entirely; the bottom
-screen is drawn centred at <code>PSZ_MODAL_SCALE</code> (default 0.66) over the
-field dimmed by <code>PSZ_MODAL_DIM</code> (default 90/255).</p>
+<p><strong>Expected:</strong> the corner elements disappear entirely and the
+bottom screen takes the whole display.</p>
 
-<p><strong>Why 66% and not full-screen:</strong> these are split scenes. The top
-screen carries real content — the race description in character create, the
-"Select an area." prompt at the counter, the logo at the title — and covering it
-hides information the dual-screen original shows. The menu must be readable
-<em>and</em> the top screen must remain readable.</p>
+<p><strong>Why full-screen:</strong> these are split scenes, and the top screen
+carries real content — the race description in character create, the "Select an
+area." prompt at the counter, the logo at the title. An earlier pass protected
+that by insetting the menu to 66% over a dimmed field. But that content is not
+the game's top screen: it is <em>our own art</em>, drawn into the modal's own
+space, so insetting the menu shrank the very thing it was making room for. The
+art is drawn over the full-screen menu instead, and nothing is lost.
+<code>PSZ_MODAL_SCALE</code> below 1 restores the inset, with
+<code>PSZ_MODAL_DIM</code> behind it.</p>
 
 <h2>PSO-style menu <span class="tag ok">opt-in</span></h2>
 <p><code>PSZ_MENU_PSO=1</code> stops presenting the menu as a screen-shaped thing
@@ -188,8 +192,8 @@ work that would make this the default.</p>
 <h2>Single-screen output <span class="tag ok">specified</span></h2>
 <figure>
   <img src="img/output-field.png" alt="Single-screen output, field">
-  <figcaption>What a player actually sees: <code>PSZ_TOPONLY=1</code>, top screen
-  only, 16:9. This is the default layout — no configuration required.</figcaption>
+  <figcaption>What a player actually sees: top screen only, 16:9. This is the
+  default layout — no configuration required.</figcaption>
 </figure>
 <figure>
   <img src="img/output-areamap.png" alt="Area map overlay toggled on with SELECT">
