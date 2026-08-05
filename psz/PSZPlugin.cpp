@@ -279,12 +279,26 @@ static constexpr u32 CcVtConfirm  = 0x02124A40;
 // is NOT screen order -- Skin sits before Costume in memory and after it on
 // screen -- and the run is not contiguous, since +0x0D and +0x0F belong to
 // something else.
-// The cursor -- which row the player is on. Found by taking three captures one
-// Down press apart: exactly ONE byte in all of main RAM read 0, 1, 2 across
-// them, and it then matched rows 3, 4 and 5 in captures it was not fitted to.
-// Reached as an offset from the widget, which is itself only reachable through
-// the fixed pointer.
-static constexpr u32 CcCursorOff = 0x5C68;
+// The cursor -- which row the player is on. It belongs to the APPEARANCE LIST
+// OBJECT, at +0x48 from the handle above, and reading it off the widget instead
+// was wrong in a way that hid itself.
+//
+// It was originally found as widget+0x5C68, by taking three captures one Down
+// press apart and keeping the single byte in all of main RAM that read 0, 1, 2 --
+// then confirmed against captures it had not been fitted to. That is a sound
+// method and it still produced a fitted constant: repeating it in a later session
+// gave widget+0x5378 just as cleanly, with +0x5C68 frozen, and on the older
+// captures +0x5378 is flat zero. The distance from the widget is not a layout at
+// all -- it is wherever the heap put the list object that run, and the list is
+// rebuilt every time you leave it and come back, which is why the old offset went
+// dead the moment name entry had been opened once.
+//
+// From the object it is one constant: sub+0x48 is the row on all 13 captures with
+// a known row, over three sessions and both heap addresses the list has occupied.
+// Gate it on the list's own vtable -- the handle also points at the keyboard and
+// the prompt, and +0x48 means nothing in those.
+static constexpr u32 CcVtList     = 0x02124634;
+static constexpr u32 CcRowOff     = 0x48;
 
 // Seven rows: six options and "Next Settings".
 static constexpr int kCcRows = 7;
@@ -1327,7 +1341,12 @@ Frame Update(NDS* nds)
                     for (int i = 0; i < 6; i++)
                         f.ccOpt[i] = (int)Read(nds, w + CcOptionsFor(f.ccRace)[i].off, 1);
 
-                    const int cur = (int)Read(nds, w + CcCursorOff, 1);
+                    // The row comes off the LIST OBJECT, not the widget, and
+                    // only when the open sub-screen really is the list.
+                    const u32 lst = Read(nds, CcSubScreen, 4);
+                    int cur = -1;
+                    if (InMainRAM(nds, lst) && Read(nds, lst, 4) == CcVtList)
+                        cur = (int)Read(nds, lst + CcRowOff, 1);
                     f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
 
                     // Name entry is separated from appearance by CcNameSlot,
