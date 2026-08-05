@@ -236,12 +236,18 @@ static constexpr u32 CcNameSlot   = 0x02124A64;
 // back-out test to establish is visible here three times over in one pass, so
 // the cache objection is answered by the capture itself.
 //
-// NOT CLAIMED: what the FIRST episode is. Something opened over the appearance
-// list before name entry did, and this capture cannot say what -- so treating
-// every live sub-screen as wanting the bottom screen is the assumption, on the
-// reasoning that a modal over the appearance list is by definition an
-// interaction the list itself is not showing. If a sub-screen turns up that
-// wants the preview instead, this is where it will be wrong.
+// AND THE FIRST EPISODE WAS THE APPEARANCE LIST ITSELF. Treating a live
+// sub-screen as wanting the bottom screen was tried and is WRONG: it presented
+// the bottom screen on appearance, because the list is a sub-screen too and this
+// word points at it. The baseline that made it look otherwise was taken in the
+// frame before the list object existed, so "null on appearance" was reading a
+// construction gap, not a state.
+//
+// The word stays useful, but as a HANDLE rather than a flag: what is open has to
+// come from the object it points at, not from whether it is set. Nothing else in
+// the 1.5K of BSS scanned holds a stable "which screen" -- 0x02124B1C is a
+// counter of openings and 0x02124B24 is a transition request that clears itself
+// once the change is made, so neither survives being polled once a frame.
 static constexpr u32 CcSubScreen  = 0x02124B20;
 
 // APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
@@ -1267,30 +1273,39 @@ Frame Update(NDS* nds)
             //
             // CcNameSlot sits in this window and will report itself, which is
             // the scan's own check that it is looking in the right place.
+            // WHICH sub-screen, from the object rather than the slot. These are
+            // C++ objects, so word 0 should be a vtable pointer -- a constant per
+            // CLASS, which is exactly the "what is open" the BSS does not hold.
+            // Log the head of the object every time the handle changes, and the
+            // appearance list, the keyboard and the prompt should come out as
+            // three distinct constants.
+            //
+            // Also logs on every change of the handle rather than once, because
+            // heap reuse gives two different screens the same ADDRESS -- the
+            // prompt landed on 0226A600, which the first sub-screen had used and
+            // freed. Address is not identity here; the vtable is.
             if (EnvSet("PSZ_CC_SCAN"))
             {
-                constexpr u32 kBase = 0x02124800, kWords = 384;   // 1.5K of ov11 BSS
-                static u32 base[kWords];
-                static bool haveBase = false;
+                static u32 lastObj = 0xFFFFFFFF;
                 static int logged = 0;
+                const u32 obj = Read(nds, CcSubScreen, 4);
 
-                if (!haveBase && f.ccScreen == 3 && !nameEntry)
+                if (obj != lastObj && logged < 40)
                 {
-                    for (u32 i = 0; i < kWords; i++) base[i] = Read(nds, kBase + i * 4, 4);
-                    haveBase = true;
-                    PszLog("cc scan: baseline on appearance, %08X..%08X",
-                           kBase, kBase + kWords * 4 - 4);
-                }
-                else if (haveBase && logged < 80)
-                {
-                    for (u32 i = 0; i < kWords && logged < 80; i++)
+                    lastObj = obj;
+                    logged++;
+                    if (!InMainRAM(nds, obj))
                     {
-                        const u32 v = Read(nds, kBase + i * 4, 4);
-                        if (v == base[i]) continue;
-                        PszLog("cc scan %08X: %08X -> %08X   [screen=%d name=%d]",
-                               kBase + i * 4, base[i], v, f.ccScreen, nameEntry ? 1 : 0);
-                        base[i] = v;
-                        logged++;
+                        PszLog("cc obj: (none)                    [name=%d]", nameEntry ? 1 : 0);
+                    }
+                    else
+                    {
+                        PszLog("cc obj %08X: vt=%08X  %08X %08X %08X %08X %08X  [name=%d]",
+                               obj,
+                               Read(nds, obj + 0x00, 4), Read(nds, obj + 0x04, 4),
+                               Read(nds, obj + 0x08, 4), Read(nds, obj + 0x0C, 4),
+                               Read(nds, obj + 0x10, 4), Read(nds, obj + 0x14, 4),
+                               nameEntry ? 1 : 0);
                     }
                 }
             }
@@ -1312,7 +1327,12 @@ Frame Update(NDS* nds)
                     // looking for a replacement are all gone with it.
                 }
             }
-            if (nameEntry || subModal) f.ccScreen = 4;
+            // subModal is NOT in this test. See CcSubScreen: the word is the
+            // current sub-screen and the appearance list is one, so it is live
+            // almost always and presenting on it took the bottom screen over
+            // appearance. The name slot is measured and stays.
+            (void)subModal;
+            if (nameEntry) f.ccScreen = 4;
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
