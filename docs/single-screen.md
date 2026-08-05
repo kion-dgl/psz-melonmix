@@ -361,6 +361,50 @@ report "name entry has been *visited*". So it was tested by entering name entry
 and backing out with B, screen-confirmed at all three points: `0`, a pointer, `0`
 again. Created on entry, destroyed on exit.
 
+### And name entry is not the last screen — the confirmation prompt
+
+Answering the keyboard's OK raises "Is this okay?" on the bottom screen. By then
+the keyboard object is destroyed, so `CcNameSlot` is 0, a name-entry-only rule
+reports appearance, and the overlay returns to the preview while the question the
+player has to answer is on a screen it is not showing. It reads as the game having
+failed at the last step of onboarding.
+
+`0x02124B20` holds the currently open sub-screen, and **the class is what decides,
+not the pointer.** Two wrong turns on the way to that, both worth keeping:
+
+- *"A sub-screen is live"* — false nearly always, because the appearance list is a
+  sub-screen too. The capture that suggested otherwise had its baseline taken one
+  frame before the list object was constructed, so a construction gap was read as
+  a state. One capture, one plausible story, shipped: the cursor-33 mistake again.
+- *Matching the pointer* — the prompt lands on `0226A600`, the block the first
+  sub-screen freed. Address is not identity under heap reuse.
+
+Word 0 of the object is its vtable, constant per class, and separates them:
+
+| vtable | screen |
+|---|---|
+| `02124700` | the first sub-screen — **still unidentified** |
+| `02124634` | the appearance list (holds a `0620xxxx` VRAM address) |
+| `02124A20` | the keyboard — the name slot is set on exactly these frames |
+| `02124A40` | "Is this okay?" |
+
+Reproduced identically over two full passes, and they sit in `ov11`'s own data
+beside `CcNameSlot`, which is where that overlay's vtables belong.
+
+**An allowlist, deliberately.** The rule presents on classes known to want the
+bottom screen rather than on "anything that is not the list", so an unseen
+sub-screen — `02124700` is one — keeps the drawn UI and the preview instead of
+inheriting a guess. Being wrong about an unknown screen should cost a missing
+presentation, not a broken appearance screen, which is the failure this cost
+twice.
+
+**The handover is held.** The keyboard object is destroyed before the prompt is
+constructed, and over those frames nothing says "present", which surfaced as the
+top screen flashing in before the prompt. The presentation holds while the handle
+is *empty*, bounded at fifteen frames; a live handle of an unknown class ends it
+at once, so the hold cannot keep the bottom screen over a screen that wants the
+preview.
+
 **A psz-re claim is contradicted by this.** `docs/game-state.md` says under Traps:
 "The title screen runs with the bottom screen off, while file select uses both",
 and offers reading the display control registers as a way to separate the

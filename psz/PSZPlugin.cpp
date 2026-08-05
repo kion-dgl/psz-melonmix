@@ -1299,59 +1299,6 @@ Frame Update(NDS* nds)
             else if (holdFrames > 0 && !InMainRAM(nds, subObj)) holdFrames--;
             else                                holdFrames = 0;
 
-            // SCAN for the CONFIRMATION prompt -- a FIFTH state neither project
-            // models. Answering the keyboard's OK does not end character create:
-            // the bottom screen asks "Is this okay?" first. By then the keyboard
-            // object is destroyed, so CcNameSlot reads 0, the rule says
-            // appearance, and the overlay goes back to the preview while the
-            // question the player has to answer is on a screen not being shown.
-            //
-            // Same method that found CcNameSlot, since it worked: baseline
-            // overlay 11's BSS on the PLAIN appearance screen -- widget set,
-            // name slot clear -- and report every word that departs from it,
-            // stamped with the screen state at the time. The keyboard opening
-            // and closing brackets the interesting frames, so whatever is live
-            // during the prompt and not during appearance is the candidate.
-            //
-            // CcNameSlot sits in this window and will report itself, which is
-            // the scan's own check that it is looking in the right place.
-            // WHICH sub-screen, from the object rather than the slot. These are
-            // C++ objects, so word 0 should be a vtable pointer -- a constant per
-            // CLASS, which is exactly the "what is open" the BSS does not hold.
-            // Log the head of the object every time the handle changes, and the
-            // appearance list, the keyboard and the prompt should come out as
-            // three distinct constants.
-            //
-            // Also logs on every change of the handle rather than once, because
-            // heap reuse gives two different screens the same ADDRESS -- the
-            // prompt landed on 0226A600, which the first sub-screen had used and
-            // freed. Address is not identity here; the vtable is.
-            if (EnvSet("PSZ_CC_SCAN"))
-            {
-                static u32 lastObj = 0xFFFFFFFF;
-                static int logged = 0;
-                const u32 obj = Read(nds, CcSubScreen, 4);
-
-                if (obj != lastObj && logged < 40)
-                {
-                    lastObj = obj;
-                    logged++;
-                    if (!InMainRAM(nds, obj))
-                    {
-                        PszLog("cc obj: (none)                    [name=%d]", nameEntry ? 1 : 0);
-                    }
-                    else
-                    {
-                        PszLog("cc obj %08X: vt=%08X  %08X %08X %08X %08X %08X  [name=%d]",
-                               obj,
-                               Read(nds, obj + 0x00, 4), Read(nds, obj + 0x04, 4),
-                               Read(nds, obj + 0x08, 4), Read(nds, obj + 0x0C, 4),
-                               Read(nds, obj + 0x10, 4), Read(nds, obj + 0x14, 4),
-                               nameEntry ? 1 : 0);
-                    }
-                }
-            }
-
             if (f.ccScreen == 3)
             {
                 const u32 w = Read(nds, CcWidgetApp, 4);

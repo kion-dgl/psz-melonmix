@@ -71,6 +71,13 @@ retune it without a rebuild:
 | `PSZ_MAP_OPACITY`, `PSZ_HUD_AREAMAP` | the SELECT area map |
 | `PSZ_CHEAT_WIDESCREEN=0` | back to 4:3 |
 | `PSZ_HUD_MAPRECT="x,y,w,h"` and friends | per-element source rects |
+| `PSZ_CC_BOTTOM` | present the bottom screen on the character-create appearance screen |
+
+In character create the top screen keeps the character preview, because the
+option lists mean nothing without the character they describe — only the keyboard
+and the "Is this okay?" prompt present the bottom screen, being the two places the
+preview cannot answer the question. `PSZ_CC_BOTTOM`, and SELECT on that screen,
+force the presentation if a screen is ever missed; neither should be needed.
 
 **An OpenGL context is required.** Upstream melonDS has two display paths and
 picks one from the renderer setting; this build always uses the GL one, because
