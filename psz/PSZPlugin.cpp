@@ -805,10 +805,16 @@ static auto BottomFramebuffer(G& gpu, long) -> const u32*
 // Is there text in this box? Counts dark pixels inside an inset margin, since
 // the game draws contextual text dark on a pale panel. Inset so the panel's own
 // border does not count as content.
+// Skip the panel's own border, which is dark and always there. Measured: the
+// full rect floors at 130 dark pixels with the box empty, against a threshold of
+// 24 -- so a probe that forgets the inset reports text permanently. The GPU
+// probe did exactly that.
+static constexpr int kBoxInset = 6;
+
 static bool BoxHasText(const u32* bottomFB, const Element& e)
 {
-    const int x0 = e.sx + 6, y0 = e.sy + 6;
-    const int x1 = e.sx + e.sw - 6, y1 = e.sy + e.sh - 6;
+    const int x0 = e.sx + kBoxInset, y0 = e.sy + kBoxInset;
+    const int x1 = e.sx + e.sw - kBoxInset, y1 = e.sy + e.sh - kBoxInset;
     if (x1 <= x0 || y1 <= y0) return false;
 
     int dark = 0;
@@ -1487,8 +1493,37 @@ Frame Update(NDS* nds)
     // itself. Published whether or not the box is currently believed to be
     // showing -- it is the question, not the answer, and a frontend that only
     // saw it while the box was up could never see it come back.
-    f.probe[0] = boxRect.sx; f.probe[1] = boxRect.sy;
-    f.probe[2] = boxRect.sw; f.probe[3] = boxRect.sh;
+    // ALREADY INSET, so the frontend measures the same interior the CPU test
+    // does rather than reproducing the inset and being one edit away from
+    // disagreeing with it.
+    if (boxRect.sw > kBoxInset * 2 && boxRect.sh > kBoxInset * 2)
+    {
+        f.probe[0] = boxRect.sx + kBoxInset;
+        f.probe[1] = boxRect.sy + kBoxInset;
+        f.probe[2] = boxRect.sw - kBoxInset * 2;
+        f.probe[3] = boxRect.sh - kBoxInset * 2;
+    }
+
+    // What the core concluded, against what the frontend measured. If the panel
+    // is on screen while this says hidden, the fault is downstream of the
+    // decision; if it says showing, the probe is the thing to look at.
+    if (EnvSet("PSZ_BOX_DEBUG"))
+    {
+        static int lastShow = -1;
+        if ((int)boxShowing != lastShow)
+        {
+            lastShow = (int)boxShowing;
+            char peek[48] = {0};
+            for (int i = 0; i < (int)sizeof(peek) - 1; i++)
+            {
+                const u32 c = Read(nds, InfoTextAddr + i * 2, 2);
+                if (!c) break;
+                peek[i] = (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
+            }
+            PszLog("box: showing=%d  fb=%s  buffer=\"%s\"",
+                   (int)boxShowing, bottomFB ? "cpu" : "gpu", peek);
+        }
+    }
 
     // Fold the UTF-16 box text to ASCII, but ONLY when the box is showing.
     // The buffer is shared and stale-retaining, so its contents say nothing

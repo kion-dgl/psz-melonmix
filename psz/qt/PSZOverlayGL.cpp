@@ -268,6 +268,35 @@ void OverlayGL::probeBox(const Frame& f, float screenW)
         // Same bar as the CPU path: more than 24 dark pixels is text rather
         // than the panel's own edging.
         SetBoxHasTextHint(dark > 24);
+
+        // What the count actually is, which is the thing to know before
+        // adjusting anything about it. Reports the rect it measured too, since a
+        // count that never moves and a rect that is wrong look identical from
+        // the outside.
+        if (std::getenv("PSZ_BOX_DEBUG"))
+        {
+            static GLuint last = 0xFFFFFFFF;
+            if (dark != last)
+            {
+                last = dark;
+                // MSAA would inflate every count by the sample rate and make the
+                // threshold meaningless -- GL_SAMPLES_PASSED counts SAMPLES.
+                // Reported once so it is ruled in or out rather than assumed.
+                static bool saidSamples = false;
+                if (!saidSamples)
+                {
+                    saidSamples = true;
+                    GLint bufs = 0, samples = 0;
+                    glGetIntegerv(GL_SAMPLE_BUFFERS, &bufs);
+                    glGetIntegerv(GL_SAMPLES, &samples);
+                    fprintf(stderr, "[psz] box probe: sample buffers=%d samples=%d\n",
+                            bufs, samples);
+                }
+                fprintf(stderr, "[psz] box probe: dark=%u -> %s   rect=%d,%d %dx%d\n",
+                        dark, dark > 24 ? "SHOWING" : "hidden",
+                        f.probe[0], f.probe[1], f.probe[2], f.probe[3]);
+            }
+        }
     }
 
     int slot = -1;
