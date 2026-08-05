@@ -212,6 +212,38 @@ static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 // this needs.
 static constexpr u32 CcNameSlot   = 0x02124A64;
 
+// THE OPEN SUB-SCREEN. A second word in ov11's BSS holding a pointer to whatever
+// modal is currently up over the appearance list -- null when the list itself
+// has the screen.
+//
+// This exists because name entry is not the last screen: answering the
+// keyboard's OK raises "Is this okay?" on the bottom screen, and by then the
+// keyboard object is destroyed, so CcNameSlot is 0 and a name-entry-only rule
+// reports appearance. melonmix went back to the preview while the question the
+// player had to answer was on a screen it was not showing, which reads as the
+// game having failed.
+//
+// MEASURED, one capture, appearance -> name entry -> OK. A counter at
+// 0x02124B1C increments each time this word goes live, and the word returns to
+// zero every time the thing closes:
+//
+//     appearance (baseline)  B1C 0   B20 00000000   A64 00000000
+//     a sub-screen           B1C 1   B20 0226A600   A64 00000000
+//     name entry             B1C 2   B20 02264A30   A64 0226A600
+//     the prompt, after OK   B1C 3   B20 0226A600   A64 00000000
+//
+// The created-and-destroyed property that the name slot needed a separate
+// back-out test to establish is visible here three times over in one pass, so
+// the cache objection is answered by the capture itself.
+//
+// NOT CLAIMED: what the FIRST episode is. Something opened over the appearance
+// list before name entry did, and this capture cannot say what -- so treating
+// every live sub-screen as wanting the bottom screen is the assumption, on the
+// reasoning that a modal over the appearance list is by definition an
+// interaction the list itself is not showing. If a sub-screen turns up that
+// wants the preview instead, this is where it will be wrong.
+static constexpr u32 CcSubScreen  = 0x02124B20;
+
 // APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
 // confirmed by changing that option on device and re-reading, not by picking a
 // plausible byte off a difference list.
@@ -1212,7 +1244,12 @@ Frame Update(NDS* nds)
             // pointer before the appearance one; the order here is the reverse
             // and agrees on every state either has captured, because the class
             // pointer is cleared on leaving that screen.
+            // Name entry, and any other modal over the appearance list -- the
+            // confirmation prompt is the one that forced this. Both want the
+            // bottom screen for the same reason: the interaction is there and
+            // the preview is not what the player needs to see.
             const bool nameEntry = (f.ccScreen == 3) && Read(nds, CcNameSlot, 4) != 0;
+            const bool subModal  = (f.ccScreen == 3) && Read(nds, CcSubScreen, 4) != 0;
 
             // SCAN for the CONFIRMATION prompt -- a FIFTH state neither project
             // models. Answering the keyboard's OK does not end character create:
@@ -1275,7 +1312,7 @@ Frame Update(NDS* nds)
                     // looking for a replacement are all gone with it.
                 }
             }
-            if (nameEntry) f.ccScreen = 4;
+            if (nameEntry || subModal) f.ccScreen = 4;
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
