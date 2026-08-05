@@ -250,6 +250,27 @@ static constexpr u32 CcNameSlot   = 0x02124A64;
 // once the change is made, so neither survives being polled once a frame.
 static constexpr u32 CcSubScreen  = 0x02124B20;
 
+// THE CONFIRMATION PROMPT, by the CLASS of the open sub-screen. Word 0 of the
+// object is its vtable, which is constant per class where the address is not:
+//
+//     vt 02124700  the first sub-screen
+//     vt 02124634  the appearance list   (holds a 0620xxxx VRAM address)
+//     vt 02124A20  the keyboard          (name slot set on exactly these frames)
+//     vt 02124A40  "Is this okay?"
+//
+// Reproduced identically over two full passes of character create. The prompt
+// and the first sub-screen both live at 0226A600 -- the prompt reuses the block
+// the first one freed -- so matching on the address would have conflated them,
+// and the vtable is what separates them. These sit in ov11's own data beside
+// CcNameSlot, which is where that overlay's vtables would be.
+//
+// An ALLOWLIST, deliberately. The rule presents on classes known to want the
+// bottom screen rather than on "anything that is not the list", so a sub-screen
+// nobody has seen yet keeps the drawn UI and the preview -- today's behaviour --
+// instead of inheriting a guess. Being wrong about an unknown screen should cost
+// a missing presentation, not a broken appearance screen.
+static constexpr u32 CcVtConfirm  = 0x02124A40;
+
 // APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
 // confirmed by changing that option on device and re-reading, not by picking a
 // plausible byte off a difference list.
@@ -1255,7 +1276,28 @@ Frame Update(NDS* nds)
             // bottom screen for the same reason: the interaction is there and
             // the preview is not what the player needs to see.
             const bool nameEntry = (f.ccScreen == 3) && Read(nds, CcNameSlot, 4) != 0;
-            const bool subModal  = (f.ccScreen == 3) && Read(nds, CcSubScreen, 4) != 0;
+
+            const u32 subObj = Read(nds, CcSubScreen, 4);
+            const bool confirmPrompt = (f.ccScreen == 3) && InMainRAM(nds, subObj)
+                                    && Read(nds, subObj, 4) == CcVtConfirm;
+
+            // HOLD ACROSS THE HANDOVER. The keyboard object is destroyed before
+            // the prompt object is constructed, and for those frames the handle
+            // is null and nothing says "present" -- which showed up as the top
+            // screen flashing in before the prompt appeared. The presentation is
+            // held while the handle is empty, so one screen hands over to the
+            // next without the preview surfacing between them.
+            //
+            // Bounded, and only over an EMPTY handle: a live handle of an
+            // unknown class ends the hold immediately, so this cannot keep the
+            // bottom screen up over a screen that wants the preview. Backing out
+            // of the keyboard with B costs a quarter second before the sliders
+            // return, which is the price of not flashing on the way in.
+            static int holdFrames = 0;
+            const bool present = nameEntry || confirmPrompt;
+            if (present)                        holdFrames = 15;
+            else if (holdFrames > 0 && !InMainRAM(nds, subObj)) holdFrames--;
+            else                                holdFrames = 0;
 
             // SCAN for the CONFIRMATION prompt -- a FIFTH state neither project
             // models. Answering the keyboard's OK does not end character create:
@@ -1327,12 +1369,10 @@ Frame Update(NDS* nds)
                     // looking for a replacement are all gone with it.
                 }
             }
-            // subModal is NOT in this test. See CcSubScreen: the word is the
-            // current sub-screen and the appearance list is one, so it is live
-            // almost always and presenting on it took the bottom screen over
-            // appearance. The name slot is measured and stays.
-            (void)subModal;
-            if (nameEntry) f.ccScreen = 4;
+            // Presenting on "a sub-screen is live" is NOT what this does, and was
+            // tried: the appearance list is a sub-screen too, so it took the
+            // bottom screen over appearance. It is the class that decides.
+            if (present || holdFrames > 0) f.ccScreen = 4;
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
