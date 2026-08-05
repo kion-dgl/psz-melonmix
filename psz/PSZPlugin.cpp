@@ -1483,6 +1483,13 @@ Frame Update(NDS* nds)
     const bool boxShowing = bottomFB ? BoxHasText(bottomFB, boxRect)
                                      : BoxHasTextHint();
 
+    // Hand the rect out so a frontend with no CPU framebuffer can answer for
+    // itself. Published whether or not the box is currently believed to be
+    // showing -- it is the question, not the answer, and a frontend that only
+    // saw it while the box was up could never see it come back.
+    f.probe[0] = boxRect.sx; f.probe[1] = boxRect.sy;
+    f.probe[2] = boxRect.sw; f.probe[3] = boxRect.sh;
+
     // Fold the UTF-16 box text to ASCII, but ONLY when the box is showing.
     // The buffer is shared and stale-retaining, so its contents say nothing
     // about whether there is a box to caption -- reading it unconditionally is

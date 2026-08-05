@@ -98,7 +98,26 @@ struct Frame
 
     // The contextual info box's own text, read from the game's UTF-16 buffer
     // and folded to ASCII so we can render it in our font. Empty when unknown.
+    //
+    // The buffer is SHARED and stale-retaining -- psz-re Q1 -- so it is filled
+    // only on frames where the box is known to be showing. Non-empty here means
+    // "the box is up and this is in it", never "this was in it once".
     char info[48] = {0};
+
+    // The bottom-screen rect a frontend should sample to answer "is the box
+    // showing", when the core cannot answer it itself. Zero when there is
+    // nothing to test.
+    //
+    // Whether the box is up is not readable from any fixed address: psz-re
+    // established the widget descends the call chain as an argument, and that
+    // the three RAM-range literals reachable from the drawing functions are zero
+    // in 47 of 48 captures INCLUDING the 45 field ones with the box on screen.
+    // So there is no global to dereference and the pixels are the signal.
+    //
+    // The core reads them itself where it can. Under an accelerated renderer
+    // GetFramebuffers() returns false -- the frame exists only as a texture --
+    // and the frontend has to answer, through SetBoxHasTextHint().
+    int probe[4] = {0, 0, 0, 0};   // sx, sy, sw, sh in bottom-screen pixels
 
     // Character create (overlay 11). screen: 0 none, 1 race, 2 class, 3 appearance.
     int ccScreen = 0;

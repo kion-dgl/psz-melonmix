@@ -62,9 +62,25 @@ private:
     // screen to copy.
     void drawAreaMap(const Frame& f, float ax, float ay, float aw, float ah);
 
+    // Answer "is the contextual box showing" for the core, which cannot read the
+    // pixels itself here -- under an accelerated renderer the frame exists only
+    // as a texture. Counts dark fragments in f.probe with an occlusion query and
+    // reports through PSZMix::SetBoxHasTextHint.
+    //
+    // The result is collected a frame LATE, on purpose. Asking for it in the
+    // frame that issued it stalls the pipeline until the GPU catches up, which
+    // is the cost this is arranged to avoid; one frame of lag on a caption
+    // appearing is 16ms and nobody can see it.
+    void probeBox(const Frame& f, float screenW);
+
     unsigned int prog = 0, vao = 0, artTex = 0;
     int uScreenSize = -1, uDstRect = -1, uSrcRect = -1, uLayer = -1, uTint = -1;
-    int uTexAlpha = -1;
+    int uTexAlpha = -1, uProbe = -1;
+
+    // Two, used alternately: one is being filled by the GPU while the other is
+    // read. A single query would have to be waited on.
+    unsigned int probeQuery[2] = {0, 0};
+    bool probeIssued[2] = {false, false};
 
     // Per instance rather than a file-scope buffer: melonDS can open a second
     // window, and each one draws on its own GL thread.
