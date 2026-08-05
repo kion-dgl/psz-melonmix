@@ -11,53 +11,22 @@ index d322e2b1..c381c301 100644
      GPU2D.cpp
      GPU2D_Soft.cpp
 diff --git a/src/frontend/qt_sdl/CMakeLists.txt b/src/frontend/qt_sdl/CMakeLists.txt
-index 31207f86..158c6b7a 100644
+index 31207f86..e5604516 100644
 --- a/src/frontend/qt_sdl/CMakeLists.txt
 +++ b/src/frontend/qt_sdl/CMakeLists.txt
-@@ -6,6 +6,8 @@ set(SOURCES_QT_SDL
+@@ -6,6 +6,7 @@ set(SOURCES_QT_SDL
      main.cpp
      main_shaders.h
      Screen.cpp
-+    PSZOverlayQt.cpp
 +    PSZOverlayGL.cpp
      Window.cpp
      EmuInstance.cpp
      EmuInstanceAudio.cpp
 diff --git a/src/frontend/qt_sdl/Screen.cpp b/src/frontend/qt_sdl/Screen.cpp
-index 3413496f..3cb6de25 100755
+index 3413496f..ac05e2f8 100755
 --- a/src/frontend/qt_sdl/Screen.cpp
 +++ b/src/frontend/qt_sdl/Screen.cpp
-@@ -38,6 +38,7 @@
- #include "GPU3D_OpenGL.h"
- #include "Platform.h"
- #include "Config.h"
-+#include "PSZOverlayQt.h"
- 
- #include "main_shaders.h"
- #include "OSD_shaders.h"
-@@ -823,6 +824,21 @@ void ScreenPanelNative::paintEvent(QPaintEvent* event)
-             painter.setTransform(screenTrans[i]);
-             painter.drawImage(screenrc, screen[screenKind[i]]);
-         }
-+
-+        // psz-melonmix: the core plugin decides what to show, this frontend
-+        // draws it in window pixels anchored to the top screen's on-window rect.
-+        {
-+            PSZMix::Frame psz = PSZMix::Update(emuInstance->getNDS());
-+            for (int i = 0; psz.active && i < numScreens; i++)
-+            {
-+                if (screenKind[i] != 0) continue;   // top screen only
-+                QRectF top = screenTrans[i].mapRect(QRectF(0, 0, 256, 192));
-+                painter.resetTransform();
-+                PSZMix::DrawOverlayQt(painter, screen[1], top, psz);
-+                break;
-+            }
-+        }
-+
-         emuInstance->renderLock.unlock();
-     }
- 
-@@ -989,6 +1005,8 @@ void ScreenPanelGL::initOpenGL()
+@@ -989,6 +989,8 @@ void ScreenPanelGL::initOpenGL()
      osdScaleFactorULoc = glGetUniformLocation(osdShader, "uScaleFactor");
      osdTexScaleULoc = glGetUniformLocation(osdShader, "uTexScale");
  
@@ -66,7 +35,7 @@ index 3413496f..3cb6de25 100755
      const float osdvertices[6*2] =
      {
          0, 0,
-@@ -1031,6 +1049,8 @@ void ScreenPanelGL::deinitOpenGL()
+@@ -1031,6 +1033,8 @@ void ScreenPanelGL::deinitOpenGL()
  
      glContext->MakeCurrent();
  
@@ -75,12 +44,13 @@ index 3413496f..3cb6de25 100755
      glDeleteTextures(1, &screenTexture);
  
      glDeleteVertexArrays(1, &screenVertexArray);
-@@ -1168,6 +1188,45 @@ void ScreenPanelGL::drawScreen()
+@@ -1168,6 +1172,46 @@ void ScreenPanelGL::drawScreen()
              glDrawArrays(GL_TRIANGLES, screenKind[i] == 0 ? 0 : 2 * 3, 2 * 3);
          }
  
-+        // psz-melonmix: same overlay as the QPainter path, on the GL one, so
-+        // that hi-res 3D (which forces this path) does not lose the HUD.
++        // psz-melonmix: the overlay. This is the only display path this build
++        // has -- see MainWindow::createScreenPanel -- so it is the only place
++        // the HUD is drawn.
 +        for (int i = 0; i < numScreens; i++)
 +        {
 +            if (screenKind[i] != 0) continue;   // top screen only
@@ -143,3 +113,81 @@ index e2cae1c7..c74d5adf 100755
      GLuint screenVertexBuffer, screenVertexArray;
      GLuint screenTexture;
      GLuint screenShaderProgram;
+diff --git a/src/frontend/qt_sdl/Window.cpp b/src/frontend/qt_sdl/Window.cpp
+index 92189a56..a476073e 100755
+--- a/src/frontend/qt_sdl/Window.cpp
++++ b/src/frontend/qt_sdl/Window.cpp
+@@ -814,44 +814,35 @@ void MainWindow::createScreenPanel()
+     panel = nullptr;
+     if (oldpanel) delete oldpanel;
+ 
+-    hasOGL = globalCfg.GetBool("Screen.UseGL") ||
+-            (globalCfg.GetInt("3D.Renderer") != renderer3D_Software);
+-
+-    if (hasOGL)
+-    {
+-        ScreenPanelGL* panelGL = new ScreenPanelGL(this);
+-        panelGL->show();
+-
+-        // make sure no GL context is in use by the emu thread
+-        // otherwise we may fail to create a shared context
+-        if (windowID != 0)
+-            emuThread->borrowGL();
+-
+-        // Check that creating the context hasn't failed
+-        if (panelGL->createContext() == false)
+-        {
+-            Log(Platform::LogLevel::Error, "Failed to create OpenGL context, falling back to Software Renderer.\n");
+-            hasOGL = false;
+-
+-            globalCfg.SetBool("Screen.UseGL", false);
+-            globalCfg.SetInt("3D.Renderer", renderer3D_Software);
+-
+-            delete panelGL;
+-            panelGL = nullptr;
+-        }
+-
+-        if (windowID != 0)
+-            emuThread->returnGL();
+-
+-        panel = panelGL;
+-    }
+-
+-    if (!hasOGL)
+-    {
+-        ScreenPanelNative* panelNative = new ScreenPanelNative(this);
+-        panel = panelNative;
+-        panel->show();
+-    }
++    // psz-melonmix: ALWAYS the GL panel. Upstream picks between two display
++    // paths, and this build had to carry a PSZ overlay for each of them --
++    // which is how the QPainter one silently fell a release behind, drawing the
++    // clips but none of our own art, so the title had no logo and character
++    // create had no UI at all. One display path, one overlay.
++    //
++    // The software 3D RENDERER is untouched and still selectable; it feeds this
++    // panel exactly as the GL one does. What is gone is the software display
++    // path, which is what decided which overlay ran.
++    hasOGL = true;
++
++    ScreenPanelGL* panelGL = new ScreenPanelGL(this);
++    panelGL->show();
++
++    // make sure no GL context is in use by the emu thread
++    // otherwise we may fail to create a shared context
++    if (windowID != 0)
++        emuThread->borrowGL();
++
++    // No fallback to fall back TO any more. A machine that cannot create a GL
++    // context gets an empty window, so say why rather than leaving it a mystery.
++    if (panelGL->createContext() == false)
++        Log(Platform::LogLevel::Error,
++            "Failed to create OpenGL context. This build requires one -- there is no software display path.\n");
++
++    if (windowID != 0)
++        emuThread->returnGL();
++
++    panel = panelGL;
+     setCentralWidget(panel);
+ 
+     if (hasMenu)

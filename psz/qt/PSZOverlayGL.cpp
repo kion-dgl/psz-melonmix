@@ -52,6 +52,7 @@ const char* kFS = R"(#version 140
 uniform sampler2DArray uTex;
 uniform float uLayer;
 uniform vec4 uTint;      // rgb multiplier, a = overall alpha; a<0 means solid fill
+uniform float uTexAlpha; // 0 = ignore the texture's alpha, 1 = multiply by it
 
 smooth in vec2 fUV;
 out vec4 oColor;
@@ -65,7 +66,10 @@ void main()
         return;
     }
     vec4 c = texture(uTex, vec3(fUV, uLayer));
-    oColor = vec4(c.rgb * uTint.rgb, uTint.a);
+    // The screen layers are opaque, so their alpha is ignored and uTint.a alone
+    // decides. The art layer is mostly transparent and its alpha is the whole
+    // point, hence the switch rather than always multiplying.
+    oColor = vec4(c.rgb * uTint.rgb, uTint.a * mix(1.0, c.a, uTexAlpha));
 }
 )";
 
@@ -98,28 +102,128 @@ bool OverlayGL::init()
     uSrcRect    = glGetUniformLocation(prog, "uSrcRect");
     uLayer      = glGetUniformLocation(prog, "uLayer");
     uTint       = glGetUniformLocation(prog, "uTint");
+    uTexAlpha   = glGetUniformLocation(prog, "uTexAlpha");
 
     // Core profile still requires *a* bound VAO even when the shader reads no
     // attributes, so this one is deliberately empty.
     glGenVertexArrays(1, &vao);
+
+    // The art layer, as a one-layer 2D ARRAY rather than a plain 2D texture, so
+    // the one shader can sample it and the screen texture without a second
+    // sampler and a second program.
+    //
+    // GL_BGRA on upload, matching how the frontend uploads the framebuffers
+    // themselves (Screen.cpp) -- RenderArtLayer packs 0xAARRGGBB, which is BGRA
+    // in memory. Uploading it as GL_RGBA swaps red and blue.
+    glGenTextures(1, &artTex);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, artTex);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D_ARRAY, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA, 256, 192, 1, 0,
+                 GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
+    glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
     return true;
 }
 
 void OverlayGL::deinit()
 {
-    if (vao)  { glDeleteVertexArrays(1, &vao); vao = 0; }
-    if (prog) { glDeleteProgram(prog); prog = 0; }
+    if (vao)    { glDeleteVertexArrays(1, &vao); vao = 0; }
+    if (artTex) { glDeleteTextures(1, &artTex); artTex = 0; }
+    if (prog)   { glDeleteProgram(prog); prog = 0; }
 }
 
 void OverlayGL::quad(float x, float y, float w, float h,
                      float u0, float v0, float u1, float v1,
-                     float layer, float alpha, float r, float g, float b)
+                     float layer, float alpha, float r, float g, float b,
+                     float texAlpha)
 {
     glUniform4f(uDstRect, x, y, w, h);
     glUniform4f(uSrcRect, u0, v0, u1, v1);
     glUniform1f(uLayer, layer);
     glUniform4f(uTint, r, g, b, alpha);
+    glUniform1f(uTexAlpha, texAlpha);
     glDrawArrays(GL_TRIANGLES, 0, 6);
+}
+
+void OverlayGL::fill(float x, float y, float w, float h,
+                     float r, float g, float b, float a)
+{
+    // Negative alpha is the shader's "solid fill" signal -- see kFS.
+    quad(x, y, w, h, 0, 0, 1, 1, 0.f, -a, r, g, b);
+}
+
+// Carried over from the QPainter path, which is where SELECT used to be handled
+// and nowhere else -- so the map did nothing on the renderer most people run.
+// Deliberately the same arithmetic: cell size from 55% of screen height,
+// centred, with a 10px surround.
+void OverlayGL::drawAreaMap(const Frame& f, float ax, float ay, float aw, float ah)
+{
+    if (f.roomCount <= 0) return;
+
+    int minX = 255, maxX = 0, minY = 255, maxY = 0;
+    for (int i = 0; i < f.roomCount; i++)
+    {
+        const Room& r = f.rooms[i];
+        if (r.cx < minX) minX = r.cx;
+        if (r.cx > maxX) maxX = r.cx;
+        if (r.cy < minY) minY = r.cy;
+        if (r.cy > maxY) maxY = r.cy;
+    }
+    const int cols = maxX - minX + 1, rows = maxY - minY + 1;
+    if (cols <= 0 || rows <= 0 || cols > 32 || rows > 32) return;
+
+    float cell = (ah * 0.55f) / (float)(cols > rows ? cols : rows);
+    if (cell < 8.f) cell = 8.f;
+    const float gw = cols * cell, gh = rows * cell;
+    const float x0 = ax + aw * 0.5f - gw * 0.5f;
+    const float y0 = ay + ah * 0.5f - gh * 0.5f;
+
+    // One opacity over the whole grid, so the field stays readable underneath.
+    // QPainter had setOpacity for this; here it multiplies into each quad's
+    // alpha, which is why every constant below is scaled by it.
+    const float o = envFloat("PSZ_MAP_OPACITY", 0.5f, 0.05f, 1.f);
+
+    // Surround: the border colour as a filled rect, with the backdrop inset by
+    // one pixel over it. Cheaper than four edge quads and it reads the same.
+    fill(x0 - 10.f, y0 - 10.f, gw + 20.f, gh + 20.f, 210/255.f, 230/255.f, 255/255.f, 0.86f * o);
+    fill(x0 - 9.f,  y0 - 9.f,  gw + 18.f, gh + 18.f, 8/255.f,   12/255.f,  22/255.f,  0.92f * o);
+
+    for (int i = 0; i < f.roomCount; i++)
+    {
+        const Room& r = f.rooms[i];
+        const float rx = x0 + (r.cx - minX) * cell, ry = y0 + (r.cy - minY) * cell;
+        const float pad = cell / 10.f + 1.f;
+        const bool here = (i == f.curRoom);
+
+        const float cx = rx + pad, cy = ry + pad, cw = cell - pad * 2, ch = cell - pad * 2;
+        if (cw <= 2.f || ch <= 2.f) continue;
+
+        fill(cx, cy, cw, ch, 1.f, 1.f, 1.f, 0.94f * o);      // outline
+        if (here) fill(cx + 1, cy + 1, cw - 2, ch - 2, 1.f, 210/255.f, 70/255.f, 1.f * o);
+        else      fill(cx + 1, cy + 1, cw - 2, ch - 2, 150/255.f, 200/255.f, 1.f, 0.96f * o);
+
+        for (int k = 0; k < 4; k++)
+        {
+            if (r.exits[k] == 0xFF) continue;
+            const bool open = (r.gates[k] == 0);
+            const float cr = open ? 235/255.f : 1.f;
+            const float cg = open ? 235/255.f : 120/255.f;
+            const float cb = open ? 235/255.f : 120/255.f;
+            const float ca = (open ? 0.86f : 0.92f) * o;
+
+            float t = cell / 7.f; if (t < 2.f) t = 2.f;
+            const float mx = rx + cell * 0.5f, my = ry + cell * 0.5f;
+            switch (k)   // N E S W
+            {
+            case 0: fill(mx - t * 0.5f, ry,                    t,       pad + t, cr, cg, cb, ca); break;
+            case 1: fill(rx + cell - pad - t, my - t * 0.5f,   pad + t, t,       cr, cg, cb, ca); break;
+            case 2: fill(mx - t * 0.5f, ry + cell - pad - t,   t,       pad + t, cr, cg, cb, ca); break;
+            case 3: fill(rx, my - t * 0.5f,                    pad + t, t,       cr, cg, cb, ca); break;
+            }
+        }
+    }
 }
 
 void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float topRect[4])
@@ -127,6 +231,16 @@ void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float t
     if (!prog || !f.active) return;
 
     const float ax = topRect[0], ay = topRect[1], aw = topRect[2], ah = topRect[3];
+
+    // Rendered before any GL state is touched, so a frame with nothing to draw
+    // costs no binds at all. RenderArtLayer clears the buffer itself.
+    const bool haveArt = RenderArtLayer(artLayer, f);
+
+    // The frontend has the screen texture bound on unit 0 and goes on using it
+    // after this returns (the OSD, the next frame's screen quads), so whatever
+    // was bound is put back before leaving.
+    GLint prevTex = 0;
+    glGetIntegerv(GL_TEXTURE_BINDING_2D_ARRAY, &prevTex);
 
     glUseProgram(prog);
     glBindVertexArray(vao);
@@ -137,38 +251,84 @@ void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float t
 
     if (f.modal)
     {
-        // Dim the field, then the bottom screen whole and centred, matching the
-        // QPainter path's 66% so the top screen stays readable around it.
-        const float dim = envFloat("PSZ_MODAL_DIM", 90.f, 0.f, 255.f) / 255.f;
-        quad(ax, ay, aw, ah, 0, 0, 1, 1, 1.f, -dim, 0.f, 0.f, 0.f);
+        // The bottom screen IS the interaction here (menus, shop, quest counter,
+        // title, file select), and it takes the WHOLE top screen -- the same
+        // presentation the Android build gives, where Composite() copies the
+        // bottom framebuffer over the top one outright.
+        //
+        // It was a 66% centred inset with a dim, to keep the split scenes' top
+        // screen readable beside the menu. That cost more than it bought: the
+        // title logo and the character-create panels are drawn by the art layer
+        // in the modal's own space, so the inset shrank the very thing it was
+        // meant to leave room for. PSZ_MODAL_SCALE below 1 restores it.
+        const float sc = envFloat("PSZ_MODAL_SCALE", 1.f, 0.2f, 1.f);
+        if (sc >= 1.f)
+        {
+            quad(ax, ay, aw, ah, 0, 0, 1, 1, 1.f, 1.f, 1.f, 1.f, 1.f);
+        }
+        else
+        {
+            const float dim = envFloat("PSZ_MODAL_DIM", 90.f, 0.f, 255.f) / 255.f;
+            quad(ax, ay, aw, ah, 0, 0, 1, 1, 1.f, -dim, 0.f, 0.f, 0.f);
 
-        const float sc = envFloat("PSZ_MODAL_SCALE", 0.66f, 0.2f, 1.f);
-        const float h = ah * sc, w = h * (256.f / 192.f);
-        quad(ax + (aw - w) * 0.5f, ay + (ah - h) * 0.5f, w, h,
-             0, 0, 1, 1, 1.f, 1.f, 1.f, 1.f, 1.f);
-        glBindVertexArray(0);
-        return;
+            const float h = ah * sc, w = h * (256.f / 192.f);
+            quad(ax + (aw - w) * 0.5f, ay + (ah - h) * 0.5f, w, h,
+                 0, 0, 1, 1, 1.f, 1.f, 1.f, 1.f, 1.f);
+        }
     }
-
-    // Elements are sized in real pixels, not DS ones, for the same reason the
-    // QPainter path is: at DS scale a 70px panel is 27% of the screen at any
-    // resolution, which is what made the overlay feel cramped in the first place.
-    const float s = envFloat("PSZ_HUD_SCALE", 2.f, 0.2f, 12.f);
-    const float m = 6.f * s;
-
-    for (int i = 0; i < f.count; i++)
+    else
     {
-        const Element& e = f.elems[i];
-        const float w = e.sw * s, h = e.sh * s;
-        const float x = (e.corner == Corner_TopLeft || e.corner == Corner_BottomLeft)
-                        ? ax + m : ax + aw - m - w;
-        const float y = (e.corner == Corner_TopLeft || e.corner == Corner_TopRight)
-                        ? ay + m : ay + ah - m - h;
+        // Layout comes from PSZMix::PlaceElement, not from arithmetic of our
+        // own. This path used to size elements as a fixed multiple of window
+        // pixels, which put them somewhere no other frontend agreed with AND
+        // somewhere the art layer -- which is positioned in DS space -- could
+        // not line up with. One layout definition, three renderers.
+        const float hs = HudScale();
+        for (int i = 0; i < f.count; i++)
+        {
+            const Element& e = f.elems[i];
 
-        quad(x, y, w, h,
-             e.sx / 256.f, e.sy / 192.f, (e.sx + e.sw) / 256.f, (e.sy + e.sh) / 192.f,
-             1.f, 1.f, 1.f, 1.f, 1.f);
+            // The art layer draws these outright, so their clips would show
+            // through underneath. Composite() and the Android GL path skip the
+            // same three.
+            if (f.panel && e.corner == Corner_TopLeft) continue;
+            if (f.info[0] && e.corner == Corner_BottomLeft) continue;
+            if (f.palette && e.corner == Corner_BottomRight) continue;
+
+            const Place p = PlaceElement(e, hs);
+            quad(ax + p.x * aw, ay + p.y * ah, p.w * aw, p.h * ah,
+                 e.sx / 256.f, e.sy / 192.f, (e.sx + e.sw) / 256.f, (e.sy + e.sh) / 192.f,
+                 1.f, 1.f, 1.f, 1.f, 1.f);
+        }
     }
+
+    // Our own art over the top: the title logo, the drawn player panel, the
+    // character-create panels. Layer 0 of a one-layer array, so uLayer is 0 here
+    // rather than the 1 the screen quads use for the bottom screen.
+    if (haveArt)
+    {
+        glActiveTexture(GL_TEXTURE0);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, artTex);
+        glTexSubImage3D(GL_TEXTURE_2D_ARRAY, 0, 0, 0, 0, 256, 192, 1,
+                        GL_BGRA, GL_UNSIGNED_BYTE, artLayer);
+        quad(ax, ay, aw, ah, 0, 0, 1, 1, 0.f, 1.f, 1.f, 1.f, 1.f, 1.f);
+        glBindTexture(GL_TEXTURE_2D_ARRAY, (unsigned int)prevTex);
+    }
+
+    // Cuts LAST. They land inside artwork the layer draws -- the palette's
+    // action icons sit in the slots of our own frame -- so drawing them with
+    // the other clips puts them under it and they vanish.
+    for (int i = 0; i < f.cutCount; i++)
+    {
+        const Frame::Cut& c = f.cuts[i];
+        quad(ax + c.dx * aw, ay + c.dy * ah, c.dw * aw, c.dh * ah,
+             c.sx / 256.f, c.sy / 192.f, (c.sx + c.sw) / 256.f, (c.sy + c.sh) / 192.f,
+             1.f, c.alpha, 1.f, 1.f, 1.f);
+    }
+
+    // Over everything, including a modal: SELECT is meant to answer "where am
+    // I" without leaving whatever is on screen.
+    if (f.areaMap) drawAreaMap(f, ax, ay, aw, ah);
 
     glBindVertexArray(0);
 }

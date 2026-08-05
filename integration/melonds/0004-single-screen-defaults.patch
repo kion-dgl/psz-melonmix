@@ -1,8 +1,8 @@
 diff --git a/src/frontend/qt_sdl/Config.cpp b/src/frontend/qt_sdl/Config.cpp
-index 0d48ee16..f5798708 100644
+index 0d48ee16..6c2b18a1 100644
 --- a/src/frontend/qt_sdl/Config.cpp
 +++ b/src/frontend/qt_sdl/Config.cpp
-@@ -52,6 +52,12 @@ DefaultList<int> DefaultInts =
+@@ -52,8 +52,19 @@ DefaultList<int> DefaultInts =
      {"Instance*.Joystick", -1},
      {"Instance*.Window*.Width", 256},
      {"Instance*.Window*.Height", 384},
@@ -13,5 +13,13 @@ index 0d48ee16..f5798708 100644
 +    {"Instance*.Window*.ScreenSizing", 4},
 +    {"Instance*.Window*.ScreenAspectTop", 1},
      {"Screen.VSyncInterval", 1},
-     {"3D.Renderer", renderer3D_Software},
+-    {"3D.Renderer", renderer3D_Software},
++    // OpenGL rather than upstream's software default. Window.cpp picks the
++    // display path from this -- hasOGL = Screen.UseGL || 3D.Renderer != software
++    // -- so the renderer setting decides which of the two PSZ overlays runs.
++    // The GL one is the path this build is developed and tested on; the QPainter
++    // one stays as the fallback for a machine where the context fails to create.
++    {"3D.Renderer", renderer3D_OpenGL},
      {"3D.GL.ScaleFactor", 1},
+ #ifdef JIT_ENABLED
+     {"JIT.MaxBlockSize", 32},

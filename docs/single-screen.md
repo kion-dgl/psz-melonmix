@@ -33,11 +33,21 @@ job). Read memory only for scene detection and the controller hacks.
       on the display at all, so a shop or the quest counter had nothing to
       interact with. Now the corner overlay is replaced by the bottom screen
       itself, centred and scaled to 88% of screen height, over a dimmed field.
-      `PSZ_HUD_NOMODAL=1` disables it. **Sized at 66% with a light dim
-      (`PSZ_MODAL_SCALE`, `PSZ_MODAL_DIM`)** so the top screen stays readable
-      around it — the PSO-style first pass. Verified on character create: the
-      "Create Character" heading, the race description and the character art are
-      all legible at once with the menu centred, where an 88% modal buried them.
+      `PSZ_HUD_NOMODAL=1` disables it. Then **sized at 66% with a light dim
+      (`PSZ_MODAL_SCALE`, `PSZ_MODAL_DIM`)** so the top screen stayed readable
+      around it — the PSO-style pass. Verified on character create: the "Create
+      Character" heading, the race description and the character art were all
+      legible at once with the menu centred, where an 88% modal buried them.
+
+      **Now full-screen again, and the reasoning inverted.** The top-screen
+      content those insets were protecting is not the game's top screen at all —
+      it is OUR art, drawn by `RenderArtLayer` into the modal's own space: the
+      title logo, the character-create panels. So the inset was shrinking the
+      thing it existed to make room for, and the desktop and Android builds
+      disagreed about what a menu looks like. Android was already full-screen
+      (`Composite` copies the bottom framebuffer over the top one outright), so
+      full-screen is now both paths. `PSZ_MODAL_SCALE` below 1 restores the
+      inset.
 
   The test needs no overlay images and no new RE: the player object pointer
   `*(0x02108D04)` is NULL in every mode that is not the main game — which covers
@@ -65,6 +75,11 @@ job). Read memory only for scene detection and the controller hacks.
       (`PSZ_MAP_OPACITY`), sized to 55% of screen height, so the field stays
       readable underneath while navigating. `PSZ_HUD_AREAMAP=1` pins it on.
 
+      Drawn on the QPainter path only, at first — so it did nothing at all on the
+      renderer most people run. Now ported to the GL path from the same
+      arithmetic, as solid-colour quads: the grid is built out of the game's own
+      room table and has no pixels on either screen to clip.
+
   **SELECT was chosen by measurement, not assumption.** With the game idle,
   pressing SELECT changed 78 pixels of the bottom-screen HUD against an idle
   drift of 90 — i.e. nothing above noise. X changed 227, roughly 2.5x the drift,
@@ -91,15 +106,27 @@ job). Read memory only for scene detection and the controller hacks.
       the top screen's on-screen rect and sized in real pixels, resolution
       genuinely buys room. `PSZ_HUD_SCALE` (default 2.0) trades element size
       against it directly.
+
+      **Superseded.** Placement now comes from `PSZMix::PlaceElement`, which
+      returns fractions of the top screen so the DS compositor, the Qt path and
+      both GL paths scale ONE layout definition into their own space. Sizing in
+      window pixels was a fourth answer, and it could not line up with the art
+      layer, which is positioned in DS space. `PSZ_HUD_ELEMENT_SCALE` is the size
+      control; `PSZ_HUD_SCALE` no longer moves anything.
 - [x] **Compare mode** — `PSZ_COMPARE=1` puts the 16:9 top screen beside the
       bottom screen, so a ported element can be checked against the original it
       was copied from in the same frame. `PSZ_TOPONLY=1` remains the
       single-screen goal. Both default to a 1920x1080 display.
+
+      **Both flags are gone.** Single-screen 16:9 became the default in
+      `Config.cpp` (`ScreenSizing=4`, `ScreenAspectTop=1`) rather than something
+      to switch on, and compare mode went with the harness it was built for.
 - [x] **16:9 widescreen** — `PSZ_WIDESCREEN=1`. From the cheat DB's "16:9
       Widescreen": if the u16 at `0x020346E0` is `0x1555`, write `0x1C71`.
       7281/5461 = 1.3333, exactly 16:9 over 4:3, so that value is the 3D
       projection's aspect term. Applied per frame the way an AR code would be,
-      so no cheat-file wiring is needed.
+      so no cheat-file wiring is needed. Now on by default as a quality-of-life
+      cheat; `PSZ_CHEAT_WIDESCREEN=0` turns it off.
 - [x] **Single-screen presentation** — `PSZ_TOPONLY=1` sets `ScreenSizing=4`
       (TopOnly) and `ScreenAspectTop=1` (16:9), widens Xvfb to 1280x720 and
       **resizes the window explicitly**. Fullscreen is only a request and there
@@ -269,6 +296,21 @@ it inherits `PSZPlugin` and has to implement drawing only — four scaled blits,
 full-screen blit for modals, and a grid of rectangles. No game knowledge crosses
 over, and no address gets re-derived.
 
+**One drawing path per frontend, though — the split has a cost and it was paid.**
+The desktop had two, because upstream has two display panels and picks between
+them from the renderer setting. Both had to carry an overlay, and the QPainter one
+fell behind without anything failing: it drew the ported clips and none of our own
+art, so the title had no logo and character create had no UI, on whichever path
+the user's settings happened to select. There was no signal, because each path was
+individually plausible.
+
+`createScreenPanel` is now patched to always build `ScreenPanelGL`, and the
+QPainter overlay is deleted. The software 3D *renderer* is untouched and still
+selectable — it feeds the same GL panel. What went is the software *display* path,
+which is the thing that chose between overlays. An OpenGL context is now required
+to run this build at all, which is the trade: one path that is always the tested
+one, against a machine with no working GL getting an empty window and a log line.
+
 ## Front-to-end flow, walked under the single-screen overlay
 
 All of it works. Booted cold and driven with buttons only, no touch:
@@ -280,6 +322,88 @@ All of it works. Booted cold and driven with buttons only, no touch:
 | **File select** | three slots, Friend Roster, WFC Settings — readable and selectable |
 | **Character create** | race select (Human / CAST / Newman) with art behind |
 | **Quest counter** (`ov12`) | area select — Gurhacia Valley, description, difficulty stars |
+
+### Why character create draws its own UI at all — the preview
+
+The option lists on these screens are meaningless on their own. Race, class and
+especially appearance are choices you make *by looking at the character*, and the
+character is on the TOP screen. Present the bottom screen whole, the way the title
+and file select are presented, and you get sliders with nothing to judge them
+against — the interaction survives and the reason for it does not.
+
+That is the whole reason these screens are drawn from our own art rather than
+clipped or presented: it is the one way to have the option list and the preview at
+the same time. Appearance is what forces it, and race and class follow because the
+machinery already exists and the preview is just as much the point there.
+
+**So the bottom screen is right for exactly one screen in create: name entry.** It
+is the only one where the preview does not matter, and the only one that cannot
+work without the game's own keyboard. Anything that presents the bottom screen
+more widely than that is trading the preview away, and the preview is the feature.
+
+Worth stating plainly because the obvious fix for a name-entry detection failure —
+"just present the bottom screen for the whole appearance screen" — looks like a
+small concession and is actually the removal of the thing these screens exist for.
+`PSZ_CC_BOTTOM` and the SELECT toggle are escape hatches for when detection fails,
+not a way of working.
+
+**Name entry is detected by `0x02124A64`**, a word in `ov11`'s BSS: null on
+appearance, a heap pointer on the name-entry screen. psz-re's measurement
+(unattended-backlog item E(a)), and it replaced a heuristic of ours that keyed on
+the cursor reading 33 — which did not reproduce here at all, the cursor reading
+0..6 and nothing else across a full pass, which is exactly why pressing "Next
+Settings" used to leave the sliders up with the keyboard unreachable.
+
+What makes the slot trustworthy where the cursor was not is that its own worst
+objection was measured rather than argued. `FUN_0211E93C` is a get-or-create, and
+a get-or-create is a cache — a cache would stay set after the screen closed and
+report "name entry has been *visited*". So it was tested by entering name entry
+and backing out with B, screen-confirmed at all three points: `0`, a pointer, `0`
+again. Created on entry, destroyed on exit.
+
+### And name entry is not the last screen — the confirmation prompt
+
+Answering the keyboard's OK raises "Is this okay?" on the bottom screen. By then
+the keyboard object is destroyed, so `CcNameSlot` is 0, a name-entry-only rule
+reports appearance, and the overlay returns to the preview while the question the
+player has to answer is on a screen it is not showing. It reads as the game having
+failed at the last step of onboarding.
+
+`0x02124B20` holds the currently open sub-screen, and **the class is what decides,
+not the pointer.** Two wrong turns on the way to that, both worth keeping:
+
+- *"A sub-screen is live"* — false nearly always, because the appearance list is a
+  sub-screen too. The capture that suggested otherwise had its baseline taken one
+  frame before the list object was constructed, so a construction gap was read as
+  a state. One capture, one plausible story, shipped: the cursor-33 mistake again.
+- *Matching the pointer* — the prompt lands on `0226A600`, the block the first
+  sub-screen freed. Address is not identity under heap reuse.
+
+Word 0 of the object is its vtable, constant per class, and separates them:
+
+| vtable | screen |
+|---|---|
+| `02124700` | the first sub-screen — **still unidentified** |
+| `02124634` | the appearance list (holds a `0620xxxx` VRAM address) |
+| `02124A20` | the keyboard — the name slot is set on exactly these frames |
+| `02124A40` | "Is this okay?" |
+
+Reproduced identically over two full passes, and they sit in `ov11`'s own data
+beside `CcNameSlot`, which is where that overlay's vtables belong.
+
+**An allowlist, deliberately.** The rule presents on classes known to want the
+bottom screen rather than on "anything that is not the list", so an unseen
+sub-screen — `02124700` is one — keeps the drawn UI and the preview instead of
+inheriting a guess. Being wrong about an unknown screen should cost a missing
+presentation, not a broken appearance screen, which is the failure this cost
+twice.
+
+**The handover is held.** The keyboard object is destroyed before the prompt is
+constructed, and over those frames nothing says "present", which surfaced as the
+top screen flashing in before the prompt. The presentation holds while the handle
+is *empty*, bounded at fifteen frames; a live handle of an unknown class ends it
+at once, so the hold cannot keep the bottom screen over a screen that wants the
+preview.
 
 **A psz-re claim is contradicted by this.** `docs/game-state.md` says under Traps:
 "The title screen runs with the bottom screen off, while file select uses both",

@@ -186,6 +186,91 @@ static constexpr u32 CcClassAddr  = 0x02156B5C;   // u8, 0..13, 0xFF unchosen
 static constexpr u32 CcWidgetCls  = 0x02156B30;   // set on class select
 static constexpr u32 CcWidgetApp  = 0x02156B34;   // set on appearance
 
+// NAME ENTRY. A word in overlay 11's own BSS: null on appearance, a heap pointer
+// on the name-entry screen.
+//
+// This is psz-re's measurement (unattended-backlog item E(a),
+// tools/charcreate.py::keyboard_slot_separates_name_entry), and it replaces the
+// cursor heuristic this file used to carry. That heuristic keyed on the cursor
+// reading 33 on one session's capture, and it simply does not reproduce: a full
+// pass of the appearance screen here read 0..6 and nothing else, so pressing
+// "Next Settings" left the sliders up and the keyboard unreachable.
+//
+// The obvious objection to this slot was raised and MEASURED away rather than
+// argued away, which is why it is trusted where the cursor was not.
+// FUN_0211E93C is a get-or-create -- read the word, return if non-null, else
+// allocate and store -- and a get-or-create is a cache, which would make this
+// "name entry has been VISITED" and useless. So it was tested by entering name
+// entry and backing out with B, screen-confirmed at all three points:
+//
+//     appearance (before)   0x00000000
+//     name entry            0x0226A600
+//     appearance (after B)  0x00000000     <- created on entry, destroyed on exit
+//
+// NOT CLAIMED, by psz-re or here: that the object IS the keyboard. Its
+// behaviour is measured and its identity is left open, and the behaviour is all
+// this needs.
+static constexpr u32 CcNameSlot   = 0x02124A64;
+
+// THE OPEN SUB-SCREEN. A second word in ov11's BSS holding a pointer to whatever
+// modal is currently up over the appearance list -- null when the list itself
+// has the screen.
+//
+// This exists because name entry is not the last screen: answering the
+// keyboard's OK raises "Is this okay?" on the bottom screen, and by then the
+// keyboard object is destroyed, so CcNameSlot is 0 and a name-entry-only rule
+// reports appearance. melonmix went back to the preview while the question the
+// player had to answer was on a screen it was not showing, which reads as the
+// game having failed.
+//
+// MEASURED, one capture, appearance -> name entry -> OK. A counter at
+// 0x02124B1C increments each time this word goes live, and the word returns to
+// zero every time the thing closes:
+//
+//     appearance (baseline)  B1C 0   B20 00000000   A64 00000000
+//     a sub-screen           B1C 1   B20 0226A600   A64 00000000
+//     name entry             B1C 2   B20 02264A30   A64 0226A600
+//     the prompt, after OK   B1C 3   B20 0226A600   A64 00000000
+//
+// The created-and-destroyed property that the name slot needed a separate
+// back-out test to establish is visible here three times over in one pass, so
+// the cache objection is answered by the capture itself.
+//
+// AND THE FIRST EPISODE WAS THE APPEARANCE LIST ITSELF. Treating a live
+// sub-screen as wanting the bottom screen was tried and is WRONG: it presented
+// the bottom screen on appearance, because the list is a sub-screen too and this
+// word points at it. The baseline that made it look otherwise was taken in the
+// frame before the list object existed, so "null on appearance" was reading a
+// construction gap, not a state.
+//
+// The word stays useful, but as a HANDLE rather than a flag: what is open has to
+// come from the object it points at, not from whether it is set. Nothing else in
+// the 1.5K of BSS scanned holds a stable "which screen" -- 0x02124B1C is a
+// counter of openings and 0x02124B24 is a transition request that clears itself
+// once the change is made, so neither survives being polled once a frame.
+static constexpr u32 CcSubScreen  = 0x02124B20;
+
+// THE CONFIRMATION PROMPT, by the CLASS of the open sub-screen. Word 0 of the
+// object is its vtable, which is constant per class where the address is not:
+//
+//     vt 02124700  the first sub-screen
+//     vt 02124634  the appearance list   (holds a 0620xxxx VRAM address)
+//     vt 02124A20  the keyboard          (name slot set on exactly these frames)
+//     vt 02124A40  "Is this okay?"
+//
+// Reproduced identically over two full passes of character create. The prompt
+// and the first sub-screen both live at 0226A600 -- the prompt reuses the block
+// the first one freed -- so matching on the address would have conflated them,
+// and the vtable is what separates them. These sit in ov11's own data beside
+// CcNameSlot, which is where that overlay's vtables would be.
+//
+// An ALLOWLIST, deliberately. The rule presents on classes known to want the
+// bottom screen rather than on "anything that is not the list", so a sub-screen
+// nobody has seen yet keeps the drawn UI and the preview -- today's behaviour --
+// instead of inheriting a guess. Being wrong about an unknown screen should cost
+// a missing presentation, not a broken appearance screen.
+static constexpr u32 CcVtConfirm  = 0x02124A40;
+
 // APPEARANCE OPTIONS, in the widget CcWidgetApp points at. Each offset was
 // confirmed by changing that option on device and re-reading, not by picking a
 // plausible byte off a difference list.
@@ -626,6 +711,36 @@ static bool ServiceAreaMapToggle(NDS* nds)
     if (held && !prev) shown = !shown;
     prev = held;
     return shown || EnvSet("PSZ_HUD_AREAMAP");
+}
+
+// SELECT during character create presents the bottom screen, whatever the name
+// entry test below believes.
+//
+// That test is provisional (Q6) and it is the only thing standing between the
+// player and the game's keyboard: get it wrong and name entry is a screen you
+// cannot see, on the one screen of the game you cannot skip. kion hit exactly
+// that and could not reach gameplay at all.
+//
+// So this is not a convenience toggle. It is the guarantee that no failure of a
+// heuristic can leave the player stuck, and it wants to keep working even after
+// the heuristic is made exact.
+static bool ServiceCcBottomToggle(NDS* nds, bool inCreate)
+{
+    static bool shown = false, prev = false;
+    if (!inCreate)
+    {
+        // Leaving create clears it, so the next character does not begin with
+        // the bottom screen already forced on from the last one.
+        shown = false; prev = false;
+        return false;
+    }
+    const bool held = !(nds->KeyInput & (1 << 2));
+    if (held && !prev) shown = !shown;
+    prev = held;
+    // PSZ_CC_BOTTOM pins it on. Belt and braces: SELECT is only known to be
+    // unused in the FIELD, and if character create turns out to consume it the
+    // key toggle is no escape hatch at all -- so there is one that needs no key.
+    return shown || EnvSet("PSZ_CC_BOTTOM");
 }
 
 static void ReadRooms(NDS* nds, Frame& f)
@@ -1137,6 +1252,8 @@ Frame Update(NDS* nds)
         // content. Draw nothing and let it through untouched.
         // Character create: read the state the game keeps at fixed addresses,
         // so the screens can be drawn rather than clipped.
+        const bool forceBottom = ServiceCcBottomToggle(nds, effectiveOverlay == 11);
+
         if (effectiveOverlay == 11)
         {
             const u32 cls = Read(nds, CcClassAddr, 1);
@@ -1147,6 +1264,41 @@ Frame Update(NDS* nds)
                        : Read(nds, CcWidgetCls, 4)      ? 2
                                                         : 0;
             if (f.ccRace < 0 || f.ccRace > 2) f.ccScreen = 0;
+
+            // Name entry keeps the appearance widget populated and its context
+            // block byte-identical, so it is 3 plus this slot rather than a
+            // screen of its own. psz-re's published rule orders the class-select
+            // pointer before the appearance one; the order here is the reverse
+            // and agrees on every state either has captured, because the class
+            // pointer is cleared on leaving that screen.
+            // Name entry, and any other modal over the appearance list -- the
+            // confirmation prompt is the one that forced this. Both want the
+            // bottom screen for the same reason: the interaction is there and
+            // the preview is not what the player needs to see.
+            const bool nameEntry = (f.ccScreen == 3) && Read(nds, CcNameSlot, 4) != 0;
+
+            const u32 subObj = Read(nds, CcSubScreen, 4);
+            const bool confirmPrompt = (f.ccScreen == 3) && InMainRAM(nds, subObj)
+                                    && Read(nds, subObj, 4) == CcVtConfirm;
+
+            // HOLD ACROSS THE HANDOVER. The keyboard object is destroyed before
+            // the prompt object is constructed, and for those frames the handle
+            // is null and nothing says "present" -- which showed up as the top
+            // screen flashing in before the prompt appeared. The presentation is
+            // held while the handle is empty, so one screen hands over to the
+            // next without the preview surfacing between them.
+            //
+            // Bounded, and only over an EMPTY handle: a live handle of an
+            // unknown class ends the hold immediately, so this cannot keep the
+            // bottom screen up over a screen that wants the preview. Backing out
+            // of the keyboard with B costs a quarter second before the sliders
+            // return, which is the price of not flashing on the way in.
+            static int holdFrames = 0;
+            const bool present = nameEntry || confirmPrompt;
+            if (present)                        holdFrames = 15;
+            else if (holdFrames > 0 && !InMainRAM(nds, subObj)) holdFrames--;
+            else                                holdFrames = 0;
+
             if (f.ccScreen == 3)
             {
                 const u32 w = Read(nds, CcWidgetApp, 4);
@@ -1158,27 +1310,32 @@ Frame Update(NDS* nds)
                     const int cur = (int)Read(nds, w + CcCursorOff, 1);
                     f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
 
-                    // NAME ENTRY, provisionally. Pressing "Next Settings" leaves
-                    // every field psz-re and this build can reach identical to
-                    // the appearance screen -- that is Q6. But the cursor keeps
-                    // counting, and on name entry it read 33, far outside the
-                    // seven rows this screen has.
-                    //
-                    // So a cursor past the last row is taken as name entry,
-                    // which must show the BOTTOM screen because it is text
-                    // input. PROVISIONAL: if the keyboard's own cursor can sit
-                    // in 0..6 this misses, and a proper signal from Q6 should
-                    // replace it. Shipped anyway because the alternative is a
-                    // screen that is always wrong rather than usually right.
-                    if (cur >= kCcRows) f.ccScreen = 4;
+                    // Name entry is separated from appearance by CcNameSlot,
+                    // measured -- see its declaration. The cursor heuristic that
+                    // used to live here, its latch, and the two probes that went
+                    // looking for a replacement are all gone with it.
                 }
             }
+            // Presenting on "a sub-screen is live" is NOT what this does, and was
+            // tried: the appearance list is a sub-screen too, so it took the
+            // bottom screen over appearance. It is the class that decides.
+            if (present || holdFrames > 0) f.ccScreen = 4;
             if (f.ccScreen >= 1 && f.ccScreen <= 3) f.active = true;
         }
 
-        // Name entry is text input; it needs the game's own keyboard.
-        if (f.ccScreen == 4)
+        // Name entry is text input; it needs the game's own keyboard. SELECT
+        // gets here too, so a missed detection is recoverable by the player
+        // rather than terminal.
+        //
+        // The escape hatch is scoped to the APPEARANCE screen. Applied to all of
+        // character create it took the bottom screen over race and class select
+        // as well, which draw correctly from our own art and were never the
+        // problem -- it fixed the screen that was broken by breaking two that
+        // worked. Name entry keeps the appearance widget live, so ccScreen still
+        // reads 3 there and this still reaches it.
+        if (f.ccScreen == 4 || (forceBottom && f.ccScreen == 3))
         {
+            f.ccScreen = 4;
             f.active = true;
             f.modal = true;
             LogFrame(f, heldOv, inGame, menuShown);
