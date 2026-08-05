@@ -323,6 +323,45 @@ All of it works. Booted cold and driven with buttons only, no touch:
 | **Character create** | race select (Human / CAST / Newman) with art behind |
 | **Quest counter** (`ov12`) | area select — Gurhacia Valley, description, difficulty stars |
 
+### The contextual box: the pixels are the only signal
+
+The bottom-left box is captioned from `0x0211CCD0`, and psz-re **disconfirmed
+that address as the box's storage** (Q1). It is a shared, stale-retaining scratch
+buffer — story dialogue under `ov17`, a clock under `ov16` — and the eight
+captures that founded "this is the box's buffer" agreed only because all eight
+were field captures. So its contents say nothing about whether there is a box to
+caption, and reading it unasked put last room's item name under an empty corner.
+
+**And no fixed address can say whether the box is up.** psz-re established the
+widget descends the call chain as an argument, and that the three RAM-range
+literals reachable from the drawing functions read zero in 47 of 48 captures —
+including the 45 field ones **with the box on screen**. There is no global to
+dereference. The pixels are the signal, which is why the test counts dark ones.
+
+The core reads them where it can. Under an accelerated renderer it cannot:
+`GetFramebuffers()` returns false and the frame exists only as a texture. So the
+frontend answers, through `SetBoxHasTextHint()` — and answers on the GPU, with an
+**occlusion query** rather than a readback, since reading pixels back costs the
+pipeline stall the overlay is otherwise careful to avoid. The shader discards
+everything above the brightness threshold and the query reports how many
+fragments survived; that is the CPU test's dark-pixel count, same threshold,
+asked as the one question a GPU answers without handing pixels over. The result
+is collected a frame late on purpose.
+
+**Inset by six pixels, and that is not a detail.** The box's own border is dark
+and always present: measured, the full rect floors at **130** dark pixels with
+the box empty, against a threshold of 24. A probe that forgets the inset reports
+text permanently, and did. Inset, the count is **exactly zero** when hidden and
+48–158 when showing — a gap, not a tuned threshold.
+
+**The buffer turned out to be usable after all**, which is worth recording
+because the plan was to abandon it for clipping the box instead. Across a walk
+through town every frame the box was up, it held the right caption — `Cyan`,
+`Millio`, `Ohyo`, `Item Shop`, `Weapon Shop`, `Custom Shop`, `Natsume`. The one
+dialogue string seen in it appeared while the box was **hidden**. Being shared
+and stale-retaining is a reason never to read it unasked; it is not a reason the
+drawn panel cannot work.
+
 ### Why character create draws its own UI at all — the preview
 
 The option lists on these screens are meaningless on their own. Race, class and

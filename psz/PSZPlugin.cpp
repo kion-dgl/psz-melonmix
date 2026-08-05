@@ -1504,27 +1504,6 @@ Frame Update(NDS* nds)
         f.probe[3] = boxRect.sh - kBoxInset * 2;
     }
 
-    // What the core concluded, against what the frontend measured. If the panel
-    // is on screen while this says hidden, the fault is downstream of the
-    // decision; if it says showing, the probe is the thing to look at.
-    if (EnvSet("PSZ_BOX_DEBUG"))
-    {
-        static int lastShow = -1;
-        if ((int)boxShowing != lastShow)
-        {
-            lastShow = (int)boxShowing;
-            char peek[48] = {0};
-            for (int i = 0; i < (int)sizeof(peek) - 1; i++)
-            {
-                const u32 c = Read(nds, InfoTextAddr + i * 2, 2);
-                if (!c) break;
-                peek[i] = (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
-            }
-            PszLog("box: showing=%d  fb=%s  buffer=\"%s\"",
-                   (int)boxShowing, bottomFB ? "cpu" : "gpu", peek);
-        }
-    }
-
     // Fold the UTF-16 box text to ASCII, but ONLY when the box is showing.
     // The buffer is shared and stale-retaining, so its contents say nothing
     // about whether there is a box to caption -- reading it unconditionally is
