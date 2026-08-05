@@ -1014,7 +1014,21 @@ static void ApplyMoveStick(NDS* nds)
 // The GL frontend cannot read framebuffer pixels cheaply, so it measures the
 // box itself on a throttled readback and reports the answer here. Defaults to
 // true: an unnecessary panel is a smaller failure than a missing prompt.
-static bool gBoxHasTextHint = true;
+// FAILS CLOSED, and it used to fail open.
+//
+// The old default was true, reasoning that a missing prompt is worse than a
+// spare one. That is right when the text is right, and the text is not:
+// psz-re disconfirmed InfoTextAddr as the box's own storage (Q1) -- it is a
+// SHARED, STALE-RETAINING scratch buffer, holding story dialogue under ov17 and
+// a clock under ov16, and keeping the last value written after the box clears.
+// The eight captures that founded "this is the box's buffer" agreed only
+// because all eight were field captures.
+//
+// So the choice is not between a missing prompt and a spare one. It is between
+// a missing prompt and a WRONG one -- a panel confidently captioning the last
+// item you stood on while you stand on nothing. A frontend that cannot answer
+// the visibility question should draw nothing until it can.
+static bool gBoxHasTextHint = false;
 void SetBoxHasTextHint(bool v) { gBoxHasTextHint = v; }
 static bool BoxHasTextHint() { return gBoxHasTextHint; }
 
@@ -1448,14 +1462,40 @@ Frame Update(NDS* nds)
     // failing toward visible, since a missing prompt is worse than a spare one.
     const u32* bottomFB = BottomFramebuffer(nds->GPU, 0);
 
-    // Fold the UTF-16 box text to ASCII. Anything outside our glyph set becomes
-    // a space rather than a wrong character.
-    for (int i = 0; i < (int)sizeof(f.info) - 1; i++)
+    // The box's source rect, resolved BEFORE the element loop, because one
+    // visibility answer has to gate the drawn text as well as the clip. It used
+    // to gate only the clip, so the drawn panel -- which is what the GL path
+    // actually shows -- was never subject to it at all and appeared whenever the
+    // scratch buffer was non-empty, which after the first pickup is always.
+    Element boxRect { 0, 0, 0, 0, Corner_BottomLeft };
+    for (const RectDef& d : Rects)
     {
-        const u32 c = Read(nds, InfoTextAddr + i * 2, 2);
-        if (!c) { f.info[i] = 0; break; }
-        f.info[i] = (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
-        f.info[i + 1] = 0;
+        if (d.corner != Corner_BottomLeft) continue;
+        boxRect = Element{ d.x, d.y, d.w, d.h, d.corner };
+        if (const char* o = SettingRaw(d.env))
+        {
+            int x, y, w, h;
+            if (std::sscanf(o, "%d,%d,%d,%d", &x, &y, &w, &h) == 4)
+            { boxRect.sx = x; boxRect.sy = y; boxRect.sw = w; boxRect.sh = h; }
+        }
+        break;
+    }
+    const bool boxShowing = bottomFB ? BoxHasText(bottomFB, boxRect)
+                                     : BoxHasTextHint();
+
+    // Fold the UTF-16 box text to ASCII, but ONLY when the box is showing.
+    // The buffer is shared and stale-retaining, so its contents say nothing
+    // about whether there is a box to caption -- reading it unconditionally is
+    // what put last room's item name under an empty corner.
+    if (boxShowing)
+    {
+        for (int i = 0; i < (int)sizeof(f.info) - 1; i++)
+        {
+            const u32 c = Read(nds, InfoTextAddr + i * 2, 2);
+            if (!c) { f.info[i] = 0; break; }
+            f.info[i] = (c >= 0x20 && c < 0x7F) ? (char)c : ' ';
+            f.info[i + 1] = 0;
+        }
     }
 
     // The action palette: our frame, the game's icons.
@@ -1504,11 +1544,7 @@ Frame Update(NDS* nds)
         if (e.sw <= 0 || e.sh <= 0 || e.sx < 0 || e.sy < 0 ||
             e.sx + e.sw > 256 || e.sy + e.sh > 192)
             continue;
-        if (e.corner == Corner_BottomLeft)
-        {
-            const bool has = bottomFB ? BoxHasText(bottomFB, e) : BoxHasTextHint();
-            if (!has) continue;
-        }
+        if (e.corner == Corner_BottomLeft && !boxShowing) continue;
 
         // The minimap goes through the CUT path rather than the element path,
         // so it can be drawn at partial opacity. Opaque it blocked roughly a
