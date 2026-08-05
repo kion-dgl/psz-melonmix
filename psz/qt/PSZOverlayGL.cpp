@@ -1,6 +1,6 @@
 /*
     OpenGL drawing for the PSZ single-screen overlay -- psz-melonmix.
-    See PSZOverlayGL.h for why this path exists alongside the QPainter one.
+    See PSZOverlayGL.h for why this is the only desktop drawing path.
 */
 
 #include "PSZOverlayGL.h"
@@ -53,12 +53,27 @@ uniform sampler2DArray uTex;
 uniform float uLayer;
 uniform vec4 uTint;      // rgb multiplier, a = overall alpha; a<0 means solid fill
 uniform float uTexAlpha; // 0 = ignore the texture's alpha, 1 = multiply by it
+uniform float uProbe;    // >0.5: counting mode, keep only dark fragments
 
 smooth in vec2 fUV;
 out vec4 oColor;
 
 void main()
 {
+    // COUNTING MODE. Nothing is drawn: the caller masks colour writes off and
+    // runs an occlusion query, so the only output is HOW MANY fragments survive.
+    // Discarding everything but the dark ones counts the glyph pixels in the
+    // box, which is the CPU path's test expressed as the one question a GPU can
+    // answer without being read back.
+    if (uProbe > 0.5)
+    {
+        vec4 p = texture(uTex, vec3(fUV, uLayer));
+        // Same threshold as BoxHasText: channel sum below 260 of 765.
+        if ((p.r + p.g + p.b) >= (260.0 / 255.0)) discard;
+        oColor = vec4(1.0);
+        return;
+    }
+
     if (uTint.a < 0.0)
     {
         // Solid fill (the modal dim). No texture fetch at all.
@@ -103,6 +118,7 @@ bool OverlayGL::init()
     uLayer      = glGetUniformLocation(prog, "uLayer");
     uTint       = glGetUniformLocation(prog, "uTint");
     uTexAlpha   = glGetUniformLocation(prog, "uTexAlpha");
+    uProbe      = glGetUniformLocation(prog, "uProbe");
 
     // Core profile still requires *a* bound VAO even when the shader reads no
     // attributes, so this one is deliberately empty.
@@ -124,11 +140,15 @@ bool OverlayGL::init()
     glTexImage3D(GL_TEXTURE_2D_ARRAY, 0, GL_RGBA, 256, 192, 1, 0,
                  GL_BGRA, GL_UNSIGNED_BYTE, nullptr);
     glBindTexture(GL_TEXTURE_2D_ARRAY, 0);
+
+    glGenQueries(2, probeQuery);
     return true;
 }
 
 void OverlayGL::deinit()
 {
+    if (probeQuery[0]) { glDeleteQueries(2, probeQuery); probeQuery[0] = probeQuery[1] = 0; }
+    probeIssued[0] = probeIssued[1] = false;
     if (vao)    { glDeleteVertexArrays(1, &vao); vao = 0; }
     if (artTex) { glDeleteTextures(1, &artTex); artTex = 0; }
     if (prog)   { glDeleteProgram(prog); prog = 0; }
@@ -226,6 +246,73 @@ void OverlayGL::drawAreaMap(const Frame& f, float ax, float ay, float aw, float 
     }
 }
 
+void OverlayGL::probeBox(const Frame& f, float screenW)
+{
+    if (!probeQuery[0] || f.probe[2] <= 0 || f.probe[3] <= 0) return;
+
+    // COLLECT whatever has finished. Both slots are checked every frame, not
+    // just the one whose turn it is: a query that was not ready when its turn
+    // came would otherwise stay outstanding, its slot never free again, and the
+    // probe would issue nothing ever after -- a deadlock that only shows up when
+    // the GPU is a frame or more behind, which is exactly when it matters.
+    for (int i = 0; i < 2; i++)
+    {
+        if (!probeIssued[i]) continue;
+        GLuint ready = 0;
+        glGetQueryObjectuiv(probeQuery[i], GL_QUERY_RESULT_AVAILABLE, &ready);
+        if (!ready) continue;   // asking anyway is the stall this avoids
+
+        GLuint dark = 0;
+        glGetQueryObjectuiv(probeQuery[i], GL_QUERY_RESULT, &dark);
+        probeIssued[i] = false;
+        // Same bar as the CPU path: more than 24 dark pixels is text rather
+        // than the panel's own edging.
+        SetBoxHasTextHint(dark > 24);
+
+    }
+
+    int slot = -1;
+    for (int i = 0; i < 2 && slot < 0; i++) if (!probeIssued[i]) slot = i;
+    if (slot < 0) return;   // both in flight; next frame
+
+    // ISSUE. Drawn at exactly the source rect's size in pixels, so one fragment
+    // stands for one DS pixel and the CPU path's threshold carries over
+    // unchanged whatever internal resolution the 3D renderer is using.
+    {
+        // Sized in DEVICE pixels, not logical ones. The viewport is in device
+        // pixels while uScreenSize is logical, so on a 2x display a quad of the
+        // rect's nominal size covers FOUR fragments per DS pixel and the count
+        // comes back 4x high against a threshold that has not moved -- the
+        // panel's own edging then reads as text on a Retina screen and not on
+        // any other. Dividing by the ratio makes one fragment one DS pixel
+        // everywhere, which is what the threshold was measured against.
+        GLint vp[4] = {0, 0, 0, 0};
+        glGetIntegerv(GL_VIEWPORT, vp);
+        float ratio = (screenW > 1.f && vp[2] > 0) ? ((float)vp[2] / screenW) : 1.f;
+        if (ratio < 0.1f || ratio > 8.f) ratio = 1.f;
+
+        const float pw = (float)f.probe[2] / ratio, ph = (float)f.probe[3] / ratio;
+
+        GLboolean mask[4];
+        glGetBooleanv(GL_COLOR_WRITEMASK, mask);
+        glColorMask(GL_FALSE, GL_FALSE, GL_FALSE, GL_FALSE);
+        glDisable(GL_BLEND);
+
+        glUniform1f(uProbe, 1.f);
+        glBeginQuery(GL_SAMPLES_PASSED, probeQuery[slot]);
+        quad(0.f, 0.f, pw, ph,
+             f.probe[0] / 256.f, f.probe[1] / 192.f,
+             (f.probe[0] + f.probe[2]) / 256.f, (f.probe[1] + f.probe[3]) / 192.f,
+             1.f, 1.f, 1.f, 1.f, 1.f);   // layer 1: the bottom screen
+        glEndQuery(GL_SAMPLES_PASSED);
+        glUniform1f(uProbe, 0.f);
+
+        glColorMask(mask[0], mask[1], mask[2], mask[3]);
+        glEnable(GL_BLEND);
+        probeIssued[slot] = true;
+    }
+}
+
 void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float topRect[4])
 {
     if (!prog || !f.active) return;
@@ -248,6 +335,10 @@ void OverlayGL::draw(const Frame& f, float screenW, float screenH, const float t
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
     glDisable(GL_DEPTH_TEST);
+
+    // Before anything is drawn, while the screen texture is still what is bound
+    // and the state is known. Costs one masked-off quad of the box's size.
+    probeBox(f, screenW);
 
     if (f.modal)
     {
