@@ -1214,6 +1214,50 @@ Frame Update(NDS* nds)
             // pointer is cleared on leaving that screen.
             const bool nameEntry = (f.ccScreen == 3) && Read(nds, CcNameSlot, 4) != 0;
 
+            // SCAN for the CONFIRMATION prompt -- a FIFTH state neither project
+            // models. Answering the keyboard's OK does not end character create:
+            // the bottom screen asks "Is this okay?" first. By then the keyboard
+            // object is destroyed, so CcNameSlot reads 0, the rule says
+            // appearance, and the overlay goes back to the preview while the
+            // question the player has to answer is on a screen not being shown.
+            //
+            // Same method that found CcNameSlot, since it worked: baseline
+            // overlay 11's BSS on the PLAIN appearance screen -- widget set,
+            // name slot clear -- and report every word that departs from it,
+            // stamped with the screen state at the time. The keyboard opening
+            // and closing brackets the interesting frames, so whatever is live
+            // during the prompt and not during appearance is the candidate.
+            //
+            // CcNameSlot sits in this window and will report itself, which is
+            // the scan's own check that it is looking in the right place.
+            if (EnvSet("PSZ_CC_SCAN"))
+            {
+                constexpr u32 kBase = 0x02124800, kWords = 384;   // 1.5K of ov11 BSS
+                static u32 base[kWords];
+                static bool haveBase = false;
+                static int logged = 0;
+
+                if (!haveBase && f.ccScreen == 3 && !nameEntry)
+                {
+                    for (u32 i = 0; i < kWords; i++) base[i] = Read(nds, kBase + i * 4, 4);
+                    haveBase = true;
+                    PszLog("cc scan: baseline on appearance, %08X..%08X",
+                           kBase, kBase + kWords * 4 - 4);
+                }
+                else if (haveBase && logged < 80)
+                {
+                    for (u32 i = 0; i < kWords && logged < 80; i++)
+                    {
+                        const u32 v = Read(nds, kBase + i * 4, 4);
+                        if (v == base[i]) continue;
+                        PszLog("cc scan %08X: %08X -> %08X   [screen=%d name=%d]",
+                               kBase + i * 4, base[i], v, f.ccScreen, nameEntry ? 1 : 0);
+                        base[i] = v;
+                        logged++;
+                    }
+                }
+            }
+
             if (f.ccScreen == 3)
             {
                 const u32 w = Read(nds, CcWidgetApp, 4);
