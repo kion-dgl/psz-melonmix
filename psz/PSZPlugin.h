@@ -80,6 +80,16 @@ struct Frame
     bool panel = false;
     int hp = 0, maxHp = 0, pp = 0, maxPp = 0, level = 0;
 
+    // Photon blast charge, 0..10000. The game treats exactly full as its own
+    // state -- a different glyph, not a filled ring -- so drawing should too.
+    int pb = 0;
+
+    // Gate keys the player is carrying. Both counters are field-scoped and read
+    // zero in town, so keysShow is false there and the digit is omitted rather
+    // than drawn as 0.
+    int keys = 0;
+    bool keysShow = false;
+
     // CUTS: a source rect on the bottom screen with an EXPLICIT destination,
     // as a fraction of the top screen. Elements anchor to a corner; these do
     // not, because they land inside artwork we draw -- the palette's three

@@ -137,6 +137,35 @@ static constexpr u32 CurPpAddr   = 0x021A2200;
 static constexpr u32 MaxHpAddr   = 0x021A210C;
 static constexpr u32 MaxPpAddr   = 0x021A210E;
 
+// PHOTON BLAST, psz-re docs/melonmix-hud-values.md -- CONFIRMED there, with the
+// draw path traced and two independent corroborations: the community "Photon
+// Blaster Gauge Max" cheat writes 0x2710 to this exact address, and two natural
+// captures read 8428 and 10000 where kion reported "has pb charge" and "full".
+// An accumulator to 10,000, four bytes past current PP in the same block.
+//
+// The game divides it by 100 and draws the result as an octagonal ring: nothing
+// below a quarter, four filling steps, and a DIFFERENT GLYPH at exactly 100.
+// That last step is why full gets its own colour below rather than just a full
+// bar -- "ready" is a different state to the player, not the end of a ramp.
+static constexpr u32 PbGaugeAddr = 0x021A2204;   // u32, 0..10000
+
+// GATE KEYS, same document -- validated against savestates, NOT gated, and the
+// difference matters: the offsets came from labelled captures rather than from
+// reading the accessor, and there is no code literal into this block anywhere
+// in the 33 modules, so the pointer is the only way in.
+//
+// THERE IS NO HELD-KEY VALUE. The game keeps two monotone counters and what the
+// player carries is their difference. Looking for a single value is what cost
+// psz-re several attempts and one withdrawn reading.
+//
+// A gate charges by its KIND: a two-key gate moves `used` by 2 in one step, so
+// two barriers can be one logical gate. Both counters are FIELD-scoped and read
+// zero outside one, which is why the digit hides rather than drawing "0" -- in
+// town there is nothing to count, and a permanent 0 in the corner is noise.
+static constexpr u32 StageCtxPtr = 0x02108C60;   // -> stage context
+static constexpr u32 KeysUsedOff = 0x7C;         // u8, rises by the gate's cost
+static constexpr u32 KeysGotOff  = 0xCC;         // u8, rises on pickup
+
 // The contextual info box's text, UTF-16LE and NUL-terminated. Confirmed
 // against eight savestates: enemy names when targeting, item names when
 // standing on one. See psz-re docs/melonmix-questions.md Q1.
@@ -1465,6 +1494,27 @@ Frame Update(NDS* nds)
         f.panel = f.maxHp > 0 && f.maxPp > 0 && f.hp <= f.maxHp &&
                   f.pp <= f.maxPp && f.level > 0 && f.level <= 200 &&
                   !EnvSet("PSZ_HUD_NOART");
+
+        // Photon blast. Range-checked for the same reason the panel is: a value
+        // over 10000 means this is not the block we think it is.
+        const u32 pb = Read(nds, PbGaugeAddr, 4);
+        f.pb = (pb <= 10000) ? (int)pb : 0;
+
+        // Gate keys, as the difference of the two counters. Shown only once
+        // something has been collected: outside a field both read zero, so
+        // "collected > 0" is what separates an empty field from a town, and
+        // it is the only separation these two values can make on their own.
+        //
+        // used > collected would mean the offsets are wrong -- it is the
+        // invariant psz-re checked across 79 field states and never saw broken.
+        // If it ever is, show nothing rather than a negative.
+        const u32 ctx = Read(nds, StageCtxPtr, 4);
+        if (f.panel && InMainRAM(nds, ctx))
+        {
+            const int used = (int)Read(nds, ctx + KeysUsedOff, 1);
+            const int got  = (int)Read(nds, ctx + KeysGotOff, 1);
+            if (got > 0 && used <= got) { f.keys = got - used; f.keysShow = true; }
+        }
     }
 
     // THE INFO PANEL EARNS ITS SPACE.
@@ -1875,19 +1925,37 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
     const int line = kGlyphH + 1;
 
     // Rounded, and the same plate as the info box -- they are the same UI.
+    // Three rows now, not two: PB joins HP and PP. The key line is added to the
+    // height only when there is a key count to draw, so a field with no keys in
+    // it keeps the plate the same size it has always been.
     DrawPlate(dst, x - 3, y - 3, bw + (int)(8 * hs),
-              (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs));
+              (kGlyphH + 1) * 4 + bh * 3 + (int)(10 * hs)
+                  + (f.keysShow ? line : 0));
 
     char buf[24];
     std::snprintf(buf, sizeof(buf), "Lv%d", f.level);
     DrawText(dst, buf, x, y, 0xFFFFFF);
 
-    struct Row { int cur, max; u32 rgb; };
-    const Row rows[2] = { { f.hp, f.maxHp, 0x40FF60 }, { f.pp, f.maxPp, 0x40A0FF } };
+    // PB is not a fraction of a maximum the player ever sees -- it is an
+    // accumulator to 10000 that the game shows as a ring in quarter steps. So
+    // it gets a percentage rather than a "cur/max", and READY rather than 100%
+    // at the top, because that is the state the game itself marks out with a
+    // different glyph.
+    const bool pbReady = f.pb >= 10000;
+    struct Row { int cur, max; u32 rgb; const char* label; };
+    const Row rows[3] = {
+        { f.hp, f.maxHp, 0x40FF60, nullptr },
+        { f.pp, f.maxPp, 0x40A0FF, nullptr },
+        { f.pb, 10000,   pbReady ? 0xFFC040u : 0xB07830u, "PB" },
+    };
     int ry = y + line + 2;
     for (const Row& r : rows)
     {
-        std::snprintf(buf, sizeof(buf), "%d/%d", r.cur, r.max);
+        if (r.label)
+            std::snprintf(buf, sizeof(buf), pbReady ? "%s READY" : "%s %d%%",
+                          r.label, r.cur / 100);
+        else
+            std::snprintf(buf, sizeof(buf), "%d/%d", r.cur, r.max);
         DrawText(dst, buf, x, ry, 0xFFFFFF);
         ry += line;
 
@@ -1906,6 +1974,16 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
             }
         }
         ry += bh + 3;
+    }
+
+    // Gate keys. The game puts this under the minimap; the minimap here is a
+    // clip of the game's own panel with that row deliberately cropped off, so
+    // the count would have nowhere to land there without inventing a second
+    // plate. It joins the readout instead, where the rest of the numbers are.
+    if (f.keysShow)
+    {
+        std::snprintf(buf, sizeof(buf), "KEYS %d", f.keys);
+        DrawText(dst, buf, x, ry, f.keys > 0 ? 0xFFD860 : 0xFFFFFF);
     }
 }
 

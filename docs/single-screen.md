@@ -199,11 +199,55 @@ Offsets came from psz-re and were checked statically against every savestate in
 ordering is worth keeping: an address bug and a rendering bug at the same time
 are much harder to separate than either alone.
 
+- [x] **PB gauge and the gate-key count**, the two elements kion asked for and
+      the overlay has been missing since the first HUD pass. Both come from
+      psz-re `docs/melonmix-hud-values.md`, and the confidence is not the same
+      for the two.
+
+      **Photon blast is `*(u32*)0x021A2204`, 0..10000** — confirmed there, with
+      the draw path traced and two independent corroborations. Drawn as a third
+      row under HP and PP: a percentage while charging, and **READY** with a
+      brighter bar at exactly full, because the game marks full out with a
+      different glyph rather than a fuller ring, and that is a different state to
+      the player rather than the end of a ramp.
+
+      **This corrects our own note**, which had the PB at `panel+0x05` behind a
+      panel object pointer nobody had. It is four bytes past current PP in the
+      block HP and PP already come from — no pointer, no new plumbing.
+
+      **Gate keys are a DIFFERENCE, not a value.** There is no held-key count in
+      memory: two monotone counters live in the stage context at
+      `*(0x02108C60)`, `+0x7C` rising by each gate's cost and `+0xCC` on pickup,
+      and what the player carries is `collected - used`. A two-key gate charges
+      2 in one step, so two barriers can be one gate. Both are field-scoped and
+      read zero in town, which is why the line is drawn only once something has
+      been collected — a permanent "KEYS 0" in the corner is noise, and
+      `collected > 0` is the only separation these two values can make on their
+      own.
+
+      Checked here before drawing: over **83 field captures** the PB never
+      exceeds 10000 and `used` is never greater than `collected` — the invariant
+      that breaks first if the offsets are wrong — and the five states with keys
+      give 1 or 2 held. Then walked on the real build: PB reads 0% in town with
+      no key line, and with the counters driven to 3 collected / 1 used the plate
+      grows a gold **KEYS 2** and the bar fills to 84%, then to **READY** at
+      10000.
+
+      **Stated plainly: the values are corpus-verified, the rendering was
+      exercised by writing the counters over the GDB stub.** A field run with
+      keys picked up naturally would be better evidence and has not been done.
+      psz-re flags the key offsets as validated-against-savestates rather than
+      gated, and the game's own HUD digit is *not* known to be computed this way.
+
+      The art-HUD path (`PSZ_HUD_ART`) is unchanged: `hp-pp.png` has troughs for
+      HP and PP and no PB element at all — the ring is drawn live by the game,
+      not baked into the panel — so adding one there would be inventing a widget
+      and guessing where it goes.
+
 ## TODO
 - [ ] **Grow the overlay element by element**, each one verified against the
-      bottom screen in the same frame the way HP/PP was. Next: PB gauge (byte
-      `panel+0x05` per psz-re's `sys.local-player-panel`, still needs the panel
-      object pointer), then the minimap from the room table.
+      bottom screen in the same frame the way HP/PP was. PB and the key count
+      are done (below); the minimap from the room table is next.
 - [ ] **Position and art** — the overlay is currently 104px in the top-left
       corner over the scene. Once widescreen lands it belongs in a margin.
 - [ ] **Find the real current-room field** (psz-re) — this is now the single
