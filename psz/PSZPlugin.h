@@ -84,11 +84,17 @@ struct Frame
     // state -- a different glyph, not a filled ring -- so drawing should too.
     int pb = 0;
 
-    // Gate keys the player is carrying. Both counters are field-scoped and read
-    // zero in town, so keysShow is false there and the digit is omitted rather
-    // than drawn as 0.
+    // Gate keys the player is carrying. Drawn under the minimap, where the game
+    // puts its own key row -- and drawn at zero too, the same as the game does,
+    // rather than appearing only once the player has picked one up.
     int keys = 0;
     bool keysShow = false;
+
+    // Where the minimap landed, as fractions of the top screen. The key count
+    // is positioned against this rather than against a corner of its own, so it
+    // stays under the map when the map is moved or rescaled.
+    bool mapPlaced = false;
+    float mx = 0, my = 0, mw = 0, mh = 0;
 
     // CUTS: a source rect on the bottom screen with an EXPLICIT destination,
     // as a fraction of the top screen. Elements anchor to a corner; these do
