@@ -340,10 +340,29 @@ are much harder to separate than either alone.
       switch. Everything else is taste: stat maxers, experience multipliers,
       movement codes. Those are **offered, not applied**, and arrive disabled.
 
-      20 cheats in four folders, from the same community database
+      22 cheats in five folders. Twenty from the same community database
       `scripts/gen-cheats.py` already reads, selected by
       `scripts/gen-cheat-db.py` into the XML melonDS-android's own importer
-      understands.
+      understands. **Two are ours** and exist nowhere else — see below.
+
+      **The rare rooms.** psz-re decompiled the special-room picker: each area is
+      entitled to one `nr*` room — the cake shop, the snowfield room, the paru
+      room, the arca plant pizza shop — and `FUN_020b2a54` draws `rand(10000)`
+      and takes the first slot whose running weight exceeds the roll. Usually it
+      runs off the end and returns −1, which is *why* those rooms are rare: about
+      1 in 40. Setting the roll range to 1 makes `rand(1)` return 0, so the first
+      eligible slot wins deterministically. The coliseum warp has the same shape
+      and its own literal.
+
+      Two things make this safe to ship rather than clever-but-risky. psz-re
+      tried the weights first — all eight slot bytes, all eight masks, every
+      weight maxed — and the outcome never moved, because the merged parameter
+      block is not sourced where those patches were written; the roll range is
+      the lever that actually works. And each literal has **exactly one
+      reference** in the whole binary, with per-function literal pools, so
+      neither patch can perturb another RNG call. Verified live by psz-re on a
+      guild-menu savestate with identical input timing in both arms: patched gave
+      `s01a_nr1`, control gave no class-`r` room at all.
 
       Three things learned by reading that importer rather than guessing:
 

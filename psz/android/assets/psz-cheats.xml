@@ -96,5 +96,18 @@
         <codes>022426B4 18C00000 022426B0 00280303 022426C4 18C00000 022426C0 00290303 022426D4 18C00000 022426D0 002A0303 022426E4 18C00000 022426E0 002B0303 022426F4 18C00000 022426F0 002C0303 02242704 18C00000 02242700 002C0303 02242714 18C00000 02242710 002D0303 02242724 18C00000 02242720 002E0303 02242734 18C00000 02242730 002F0303</codes>
       </cheat>
     </folder>
+    <folder>
+      <name>Rare rooms</name>
+      <cheat>
+        <name>Rare room always appears</name>
+        <note>The special nr* room the area is entitled to, every field instead of roughly 1 in 40. Stages 1-2 give the cake shop, 3 the snowfield room, 4 the pumpkin room, 5 the paru room, 6-7 the arca plant pizza shop.</note>
+        <codes>020B2AF8 00000001</codes>
+      </cheat>
+      <cheat>
+        <name>Coliseum always appears</name>
+        <note>The coliseum warp in the E transition, every time instead of 8%.</note>
+        <codes>02082BB8 00000001</codes>
+      </cheat>
+    </folder>
   </game>
 </codelist>

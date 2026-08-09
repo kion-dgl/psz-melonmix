@@ -72,6 +72,33 @@ FOLDERS = [
     ]),
 ]
 
+# CHEATS THAT ARE OURS, not the community database's. These come out of psz-re's
+# own decompilation and exist nowhere else, which is the whole reason to ship
+# them: nobody can find these on the web because nobody else has them.
+#
+# Both are one-word writes to a literal-pool constant, and psz-re checked the
+# thing that makes that safe: each literal has EXACTLY ONE reference in the whole
+# binary -- 0x020b2af8 from FUN_020b2a54, 0x02082bb8 from FUN_02082b30 -- and
+# literal pools are per-function here, so neither can perturb another RNG call.
+FIRST_PARTY = [
+    ("Rare rooms", [
+        ("Rare room always appears", "020B2AF8 00000001",
+         "The special nr* room the area is entitled to, every field instead of "
+         "roughly 1 in 40. Stages 1-2 give the cake shop, 3 the snowfield room, "
+         "4 the pumpkin room, 5 the paru room, 6-7 the arca plant pizza shop."),
+        ("Coliseum always appears", "02082BB8 00000001",
+         "The coliseum warp in the E transition, every time instead of 8%."),
+    ]),
+]
+
+# WHY THE ROLL RANGE AND NOT THE WEIGHTS. FUN_020b2a54 draws rand(10000) and
+# returns the first slot whose running weight total exceeds the roll; usually it
+# runs off the end and returns -1, which is what makes these rooms rare. Setting
+# the range to 1 makes rand(1) return 0, so the first eligible slot wins
+# deterministically. psz-re tried the weights first -- all eight slot bytes, all
+# eight masks, all weights maxed -- and the outcome never moved, because the
+# merged parameter block is not sourced where those patches were written.
+
 # NOTHING [SELECT]-PREFIXED. The database has a family of codes that activate
 # while SELECT is held -- money, photon drops, a character modifier -- and this
 # build binds SELECT to the area-map toggle. They would work, but every use
@@ -118,6 +145,14 @@ def main():
             for n in present:
                 codes = " ".join(blocks[n].split())
                 f.write("      <cheat>\n        <name>%s</name>\n" % sx.escape(n))
+                f.write("        <codes>%s</codes>\n      </cheat>\n" % codes)
+                kept += 1
+            f.write("    </folder>\n")
+        for folder, entries in FIRST_PARTY:
+            f.write("    <folder>\n      <name>%s</name>\n" % sx.escape(folder))
+            for name, codes, note in entries:
+                f.write("      <cheat>\n        <name>%s</name>\n" % sx.escape(name))
+                f.write("        <note>%s</note>\n" % sx.escape(note))
                 f.write("        <codes>%s</codes>\n      </cheat>\n" % codes)
                 kept += 1
             f.write("    </folder>\n")
