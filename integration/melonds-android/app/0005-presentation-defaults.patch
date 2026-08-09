@@ -1,5 +1,5 @@
 diff --git a/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt b/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
-index 786ef5cf..3648e26a 100644
+index 786ef5cf..8be31dbd 100644
 --- a/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
 +++ b/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
 @@ -11,8 +11,16 @@ import kotlinx.coroutines.DelicateCoroutinesApi
@@ -24,11 +24,11 @@ index 786ef5cf..3648e26a 100644
      companion object {
          const val NOTIFICATION_CHANNEL_ID_BACKGROUND_TASKS = "channel_cheat_importing"
 +        private const val BUNDLED_CHEATS_ASSET = "psz-cheats.xml"
-+        private const val PREF_CHEATS_SEEDED = "psz_bundled_cheats_seeded_v1"
++        private const val PREF_CHEATS_SEEDED = "psz_bundled_cheats_seeded_hash"
  
          init {
              System.loadLibrary("melonDS-android-frontend")
-@@ -31,15 +41,70 @@ class MelonDSApplication : Application(), Configuration.Provider {
+@@ -31,15 +41,80 @@ class MelonDSApplication : Application(), Configuration.Provider {
      @Inject lateinit var settingsRepository: SettingsRepository
      @Inject lateinit var migrator: Migrator
      @Inject lateinit var uriHandler: UriHandler
@@ -60,16 +60,26 @@ index 786ef5cf..3648e26a 100644
 +     *
 +     * Guarded by a preference rather than by looking for the database: a user
 +     * who deletes it meant to, and re-seeding on the next launch would make it
-+     * impossible to get rid of. Bump the key to re-seed after changing the XML.
++     * impossible to get rid of.
++     *
++     * THE GUARD STORES THE ASSET'S OWN HASH, not a version number somebody has
++     * to remember to bump. The first cut used a "_v1" key and a changed XML
++     * shipped without touching it, which left an already-seeded device unable to
++     * ever see the new cheats -- silently, because the guard did exactly what it
++     * was told. Keying on the content makes editing the XML the same act as
++     * invalidating the guard.
 +     */
 +    @OptIn(DelicateCoroutinesApi::class)
 +    private fun seedBundledCheats() {
 +        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
-+        if (prefs.getBoolean(PREF_CHEATS_SEEDED, false)) return
 +
 +        GlobalScope.launch(Dispatchers.IO) {
 +            try {
-+                assets.open(BUNDLED_CHEATS_ASSET).use { stream ->
++                val bytes = assets.open(BUNDLED_CHEATS_ASSET).use { it.readBytes() }
++                val hash = bytes.contentHashCode().toString()
++                if (prefs.getString(PREF_CHEATS_SEEDED, null) == hash) return@launch
++
++                bytes.inputStream().use { stream ->
 +                    XmlCheatDatabaseParser().parseCheatDatabase(
 +                        ProgressTrackerInputStream(stream),
 +                        object : CheatDatabaseParserListener {
@@ -88,7 +98,7 @@ index 786ef5cf..3648e26a 100644
 +                        },
 +                    )
 +                }
-+                prefs.edit().putBoolean(PREF_CHEATS_SEEDED, true).apply()
++                prefs.edit().putString(PREF_CHEATS_SEEDED, hash).apply()
 +            } catch (e: Exception) {
 +                // Seeding is a convenience. A failure here must not stop the app
 +                // starting, and leaving the flag unset lets the next launch retry.

@@ -383,7 +383,12 @@ are much harder to separate than either alone.
 
       Seeding is guarded by a preference, not by looking for the database — a
       user who deletes it meant to, and re-seeding on next launch would make it
-      impossible to get rid of.
+      impossible to get rid of. **The guard stores the asset's own hash**, which
+      it did not at first: the original keyed on `_v1`, a changed XML shipped
+      without bumping it, and a device that had already seeded could never see
+      the new cheats — silently, because the guard did exactly what it was told.
+      Keying on the content makes editing the XML the same act as invalidating
+      the guard.
 
 ## TODO
 - [ ] **Grow the overlay element by element**, each one verified against the
