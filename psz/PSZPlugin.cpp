@@ -1502,14 +1502,26 @@ Frame Update(NDS* nds)
 
         // Gate keys, as the difference of the two counters.
         //
-        // SHOWN AT ZERO, which is a correction. It used to appear only once
-        // something had been collected, on the reasoning that both counters read
-        // zero outside a field so a standing "KEYS 0" would be noise. kion tested
-        // it and wants the count visible in the field from the start -- and the
-        // game agrees with him: its own key row sits under the minimap reading
-        // "x0" before you have found anything, in town as well as in a field. So
-        // matching the game is both what was asked for and the simpler rule, and
-        // it needs no field test.
+        // SHOWN AT ZERO IN A FIELD, and not shown at all outside one. Both
+        // halves came from kion playing it.
+        //
+        // It first appeared only once something had been collected, because both
+        // counters read zero outside a field and I had no way to tell an empty
+        // field from a town. He wants "KEYS 0" from the moment he lands, which
+        // the game itself does -- and then, seeing it everywhere, that it should
+        // stay out of Dairon City. So the field test I dodged is needed after
+        // all, and it is the room table rather than the counters.
+        //
+        // MEASURED, all three cases:
+        //
+        //   Dairon City, and the transporter hub    0 rooms
+        //   the arena                               1 room, all four exits 0xFF
+        //   every capture that has ever held a key  8, 9, 10, 14 or 15 rooms
+        //
+        // So the gate is two or more rooms: somewhere you can walk between rooms
+        // is somewhere gates and keys exist. A single exitless room is an arena,
+        // where a key count is exactly the noise he is objecting to. The count is
+        // applied after ReadRooms below, which is where roomCount is filled in.
         //
         // used > collected would mean the offsets are wrong -- it is the
         // invariant psz-re checked across 79 field states and never saw broken.
@@ -1665,6 +1677,12 @@ Frame Update(NDS* nds)
     }
 
     ReadRooms(nds, f);
+
+    // The key count is a FIELD element -- see the gate-key note above for the three
+    // measurements behind the threshold. Applied here because this is where the
+    // room count exists; the counters themselves were read much earlier.
+    if (f.roomCount < 2) f.keysShow = false;
+
     f.active = true;
     LogFrame(f, heldOv, inGame, menuShown);
     return f;

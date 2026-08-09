@@ -239,8 +239,8 @@ are much harder to separate than either alone.
       and what the player carries is `collected - used`. A two-key gate charges
       2 in one step, so two barriers can be one gate.
 
-      **Drawn under the minimap, right-aligned to it, and shown at zero.** Both
-      halves of that are corrections. It first sat in the top-left readout,
+      **Drawn under the minimap, right-aligned to it, shown at zero, and only in
+      a field.** All of that came out of kion testing it. It first sat in the top-left readout,
       because our map rect crops the game's own key row off and there was nothing
       to anchor to; kion's answer was that proximity to the map is the whole
       point, so the map now records where it landed and the count hangs off that
@@ -248,8 +248,21 @@ are much harder to separate than either alone.
       been collected, on my reasoning that both counters read zero outside a field
       so a standing "KEYS 0" would be noise — kion wants it visible in the field
       from the start, and **the game agrees with him**: its own key row reads `x0`
-      before you have found anything. Matching the game is both what was asked for
-      and the simpler rule, and it needs no field test at all.
+      before you have found anything.
+
+      Which then made it visible in Dairon City, where he does not want it — so
+      the field test I had dodged is needed after all, and it is the room table
+      rather than the counters. Measured, all three cases:
+
+      | | rooms |
+      |---|---|
+      | Dairon City, and the transporter hub | **0** |
+      | the arena | **1**, all four exits `0xFF` |
+      | every capture that has ever held a key | **8, 9, 10, 14, 15** |
+
+      So the gate is **two or more rooms** — somewhere you can walk between rooms
+      is somewhere gates and keys exist, and a single exitless room is an arena,
+      where a key count is exactly the noise being complained about.
 
       Checked here before drawing: over **83 field captures** the PB never
       exceeds 10000 and `used` is never greater than `collected` — the invariant
