@@ -1,16 +1,113 @@
+diff --git a/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt b/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
+index 786ef5cf..3648e26a 100644
+--- a/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
++++ b/app/src/main/java/me/magnum/melonds/MelonDSApplication.kt
+@@ -11,8 +11,16 @@ import kotlinx.coroutines.DelicateCoroutinesApi
+ import kotlinx.coroutines.Dispatchers
+ import kotlinx.coroutines.GlobalScope
+ import kotlinx.coroutines.launch
++import androidx.preference.PreferenceManager
++import kotlinx.coroutines.runBlocking
+ import me.magnum.melonds.common.UriFileHandler
++import me.magnum.melonds.common.cheats.CheatDatabaseParserListener
++import me.magnum.melonds.common.cheats.ProgressTrackerInputStream
++import me.magnum.melonds.common.cheats.XmlCheatDatabaseParser
+ import me.magnum.melonds.common.uridelegates.UriHandler
++import me.magnum.melonds.domain.model.CheatDatabase
++import me.magnum.melonds.domain.model.Game
++import me.magnum.melonds.domain.repositories.CheatsRepository
+ import me.magnum.melonds.domain.repositories.SettingsRepository
+ import me.magnum.melonds.migrations.Migrator
+ import javax.inject.Inject
+@@ -21,6 +29,8 @@ import javax.inject.Inject
+ class MelonDSApplication : Application(), Configuration.Provider {
+     companion object {
+         const val NOTIFICATION_CHANNEL_ID_BACKGROUND_TASKS = "channel_cheat_importing"
++        private const val BUNDLED_CHEATS_ASSET = "psz-cheats.xml"
++        private const val PREF_CHEATS_SEEDED = "psz_bundled_cheats_seeded_v1"
+ 
+         init {
+             System.loadLibrary("melonDS-android-frontend")
+@@ -31,15 +41,70 @@ class MelonDSApplication : Application(), Configuration.Provider {
+     @Inject lateinit var settingsRepository: SettingsRepository
+     @Inject lateinit var migrator: Migrator
+     @Inject lateinit var uriHandler: UriHandler
++    @Inject lateinit var cheatsRepository: CheatsRepository
+ 
+     override fun onCreate() {
+         super.onCreate()
+         createNotificationChannels()
+         applyTheme()
+         performMigrations()
++        seedBundledCheats()
+         MelonDSAndroidInterface.setup(UriFileHandler(this, uriHandler))
+     }
+ 
++    /**
++     * Put this build's cheat database into the cheat menu, once, on first run.
++     *
++     * melonDS ships with an empty cheat list and expects you to find a database
++     * on the web and import it through Settings. On a handheld that is a real
++     * errand, and it is the same database every time for a build that plays one
++     * game -- so it comes bundled and lands in the menu by itself.
++     *
++     * ALL OF THEM ARRIVE DISABLED. The parser constructs every cheat with
++     * enabled = false and nothing here changes that: these are stat maxers,
++     * experience multipliers and movement codes, which are taste rather than
++     * improvement. The one cheat that IS simply on -- 16:9 widescreen -- is
++     * applied by the plugin instead and is deliberately absent from the
++     * database, because a switch that does not turn it off is worse than none.
++     *
++     * Guarded by a preference rather than by looking for the database: a user
++     * who deletes it meant to, and re-seeding on the next launch would make it
++     * impossible to get rid of. Bump the key to re-seed after changing the XML.
++     */
++    @OptIn(DelicateCoroutinesApi::class)
++    private fun seedBundledCheats() {
++        val prefs = PreferenceManager.getDefaultSharedPreferences(this)
++        if (prefs.getBoolean(PREF_CHEATS_SEEDED, false)) return
++
++        GlobalScope.launch(Dispatchers.IO) {
++            try {
++                assets.open(BUNDLED_CHEATS_ASSET).use { stream ->
++                    XmlCheatDatabaseParser().parseCheatDatabase(
++                        ProgressTrackerInputStream(stream),
++                        object : CheatDatabaseParserListener {
++                            override fun onDatabaseParseStart(databaseName: String): CheatDatabase = runBlocking {
++                                cheatsRepository.deleteCheatDatabaseIfExists(databaseName)
++                                cheatsRepository.addCheatDatabase(databaseName)
++                            }
++
++                            override fun onGameParseStart(gameName: String) = Unit
++
++                            override fun onGameParsed(game: Game): Unit = runBlocking {
++                                cheatsRepository.addGameCheats(game)
++                            }
++
++                            override fun onParseComplete() = Unit
++                        },
++                    )
++                }
++                prefs.edit().putBoolean(PREF_CHEATS_SEEDED, true).apply()
++            } catch (e: Exception) {
++                // Seeding is a convenience. A failure here must not stop the app
++                // starting, and leaving the flag unset lets the next launch retry.
++            }
++        }
++    }
++
+     private fun createNotificationChannels() {
+         val defaultChannel = NotificationChannelCompat.Builder(NOTIFICATION_CHANNEL_ID_BACKGROUND_TASKS, NotificationManagerCompat.IMPORTANCE_LOW)
+             .setName(getString(R.string.notification_channel_background_tasks))
 diff --git a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
-index cee6869b..f25dc06f 100644
+index cee6869b..d2403603 100644
 --- a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
 +++ b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
-@@ -280,14 +280,18 @@ class SharedPreferencesSettingsRepository(
+@@ -280,14 +280,14 @@ class SharedPreferencesSettingsRepository(
  
      override fun getVideoRenderer(): Flow<VideoRenderer> {
          return getOrCreatePreferenceSharedFlow("video_renderer") {
 -            val videoRendererPreference = preferences.getString("video_renderer", "software")!!
-+            // OpenGL, not upstream's software default. The XML defaultValue only
-+            // lands once the settings screen has been opened, so a fresh
-+            // profile takes this one -- they have to agree or the default
-+            // depends on whether the user has been to Settings.
 +            val videoRendererPreference = preferences.getString("video_renderer", "opengl")!!
              VideoRenderer.valueOf(videoRendererPreference.uppercase())
          }
@@ -24,10 +121,10 @@ index cee6869b..f25dc06f 100644
          }
      }
 diff --git a/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt b/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
-index 699a5eb5..e22aebe3 100644
+index 699a5eb5..7df988b7 100644
 --- a/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
 +++ b/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
-@@ -10,10 +10,16 @@ class DefaultControllerConfigurationFactory : ControllerConfigurationFactory {
+@@ -10,10 +10,15 @@ class DefaultControllerConfigurationFactory : ControllerConfigurationFactory {
  
      override fun buildDefaultControllerConfiguration(): ControllerConfiguration {
          val inputList = listOf(
@@ -40,7 +137,6 @@ index 699a5eb5..e22aebe3 100644
 +            // Nintendo-labelled pad, where the positions are mirrored against
 +            // the Xbox convention. The Retroid is Xbox-labelled, so the cross
 +            // means the button under your thumb is never the one the game names.
-+            // A build for one game on that hardware should match the print.
 +            InputConfig(Input.A, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_A)),
 +            InputConfig(Input.B, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_B)),
 +            InputConfig(Input.X, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_X)),
@@ -79,10 +175,10 @@ index 464343eb..5f453e6e 100644
          <item>Compute</item>
      </string-array>
 diff --git a/app/src/main/res/xml/pref_audio.xml b/app/src/main/res/xml/pref_audio.xml
-index d01a0d7c..d934f4c3 100644
+index d01a0d7c..8167ffba 100644
 --- a/app/src/main/res/xml/pref_audio.xml
 +++ b/app/src/main/res/xml/pref_audio.xml
-@@ -50,8 +50,12 @@
+@@ -50,7 +50,11 @@
              android:entryValues="@array/audio_latency_values"
              android:defaultValue="medium" />
  
@@ -90,13 +186,12 @@ index d01a0d7c..d934f4c3 100644
 +         so the only thing this setting can do is prompt for a permission the
 +         game never uses. -->
      <ListPreference
-             android:key="mic_source"
 +            app:isPreferenceVisible="false"
+             android:key="mic_source"
              android:title="@string/microphone_source"
              android:summary="%s"
-             app:iconSpaceReserved="false"
 diff --git a/app/src/main/res/xml/pref_video.xml b/app/src/main/res/xml/pref_video.xml
-index d60618b0..beb21b1c 100644
+index d60618b0..e91207ea 100644
 --- a/app/src/main/res/xml/pref_video.xml
 +++ b/app/src/main/res/xml/pref_video.xml
 @@ -10,7 +10,7 @@
@@ -117,29 +212,25 @@ index d60618b0..beb21b1c 100644
  
      <SwitchPreference
              android:key="enable_threaded_rendering"
-@@ -46,11 +46,17 @@
+@@ -46,7 +46,13 @@
              android:entryValues="@array/fps_counter_position_values"
              android:defaultValue="hidden" />
  
 +    <!-- HIDDEN, not deleted. PSZ is a DS game and never touches the DSi
-+         cameras, so this is a setting that can only confuse. The preference
-+         itself stays so the stored value and the code reading it are unchanged;
-+         taking the camera out properly means the manifest feature, the runtime
-+         permission and CameraManager too, which is its own piece of work. -->
++         cameras. The preference itself stays so the stored value and the code
++         reading it are unchanged; taking the camera out properly means the
++         manifest feature, the runtime permission and CameraManager too, which
++         is its own piece of work (issue #5). -->
      <ListPreference
++            app:isPreferenceVisible="false"
              android:key="dsi_camera_source"
              android:title="@string/dsi_camera_source"
              android:summary="%s"
-             app:iconSpaceReserved="false"
-+            app:isPreferenceVisible="false"
-             android:entries="@array/dsi_camera_source_options"
-             android:entryValues="@array/dsi_camera_source_values"
+@@ -56,6 +62,7 @@
              android:defaultValue="physical_cameras" />
-@@ -59,6 +65,7 @@
+ 
+     <me.magnum.melonds.ui.settings.preferences.StoragePickerPreference
++            app:isPreferenceVisible="false"
              android:key="dsi_camera_static_image"
              android:title="@string/dsi_camera_image"
              android:dependency="dsi_camera_source"
-+            app:isPreferenceVisible="false"
-             app:iconSpaceReserved="false"
-             app:type="file"
-             app:permissions="read"

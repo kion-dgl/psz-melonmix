@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<codelist>
+  <name>PSZ MelonMix (bundled)</name>
+  <game>
+    <name>Phantasy Star 0 (USA)</name>
+    <gameid>C24E 0AFFC6C3</gameid>
+    <folder>
+      <name>Character</name>
+      <cheat>
+        <name>Max Health</name>
+        <codes>121A21FE 0000270F 121A210C 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Max PP</name>
+        <codes>121A2200 000003E7 121A210E 000003E7</codes>
+      </cheat>
+      <cheat>
+        <name>Max Attack</name>
+        <codes>121A2110 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Max Defense</name>
+        <codes>121A2112 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Max Magic Attack</name>
+        <codes>121A2118 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Max Accuracy</name>
+        <codes>121A2114 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Max Evasion</name>
+        <codes>121A2116 0000270F</codes>
+      </cheat>
+      <cheat>
+        <name>Infinite HP</name>
+        <codes>DA000000 021A210C D7000000 021A21FE D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>Infinite PP</name>
+        <codes>DA000000 021A210E D7000000 021A2200 D2000000 00000000</codes>
+      </cheat>
+    </folder>
+    <folder>
+      <name>Experience</name>
+      <cheat>
+        <name>x2</name>
+        <codes>02000000 1C0D1C06 02000004 F03E006D 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>x4</name>
+        <codes>02000000 1C0D1C06 02000004 F03E00AD 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>x8</name>
+        <codes>02000000 1C0D1C06 02000004 F03E00ED 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>x16</name>
+        <codes>02000000 1C0D1C06 02000004 F03E012D 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>x32</name>
+        <codes>02000000 1C0D1C06 02000004 F03E016D 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>x64</name>
+        <codes>02000000 1C0D1C06 02000004 F03E01AD 12000008 0000F912 92000008 0000F912 1203E22A 0000F7C1 1203E22C 0000FEE9 D2000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>Super Quick Exp Gain</name>
+        <codes>6211A530 00000000 B211A530 00000000 DC000000 00000068 A0000000 00000000 10000000 0000FFFF D2000000 00000000</codes>
+      </cheat>
+    </folder>
+    <folder>
+      <name>Movement</name>
+      <cheat>
+        <name>2x Movement Speed</name>
+        <codes>520945A0 1C0231C2 120945A2 00000042 D0000000 00000000</codes>
+      </cheat>
+      <cheat>
+        <name>Even Quicker Anims</name>
+        <codes>921A2188 00001000 021A2188 00002000 D2000000 00000000</codes>
+      </cheat>
+    </folder>
+    <folder>
+      <name>Items</name>
+      <cheat>
+        <name>Boost Material x99 each</name>
+        <codes>02242744 18C00000 02242740 00000503 02242754 18C00000 02242750 00010503 02242764 18C00000 02242760 00020503 02242774 18C00000 02242770 00030503 02242784 18C00000 02242780 00040503 02242794 18C00000 02242790 00050503 022427A4 18C00000 022427A0 00060503</codes>
+      </cheat>
+      <cheat>
+        <name>Soul Item x99 each</name>
+        <codes>022426B4 18C00000 022426B0 00280303 022426C4 18C00000 022426C0 00290303 022426D4 18C00000 022426D0 002A0303 022426E4 18C00000 022426E0 002B0303 022426F4 18C00000 022426F0 002C0303 02242704 18C00000 02242700 002C0303 02242714 18C00000 02242710 002D0303 02242724 18C00000 02242720 002E0303 02242734 18C00000 02242730 002F0303</codes>
+      </cheat>
+    </folder>
+  </game>
+</codelist>

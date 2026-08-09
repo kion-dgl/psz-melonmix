@@ -327,6 +327,45 @@ are much harder to separate than either alone.
       what it has, including the button mapping. On the Retroid that needs a
       reset-to-defaults in the app, or clearing the setting.
 
+- [x] **The cheat menu comes with cheats in it.** melonDS ships an empty cheat
+      list and expects you to find a database on the web and import it through
+      Settings — a real errand on a handheld, and the same errand every time for
+      a build that plays one game. So the database is bundled and seeded into the
+      menu on first run.
+
+      **The split is the point, and it matches how these codes differ.** 16:9
+      widescreen is an unambiguous improvement with no decision attached, so the
+      plugin applies it every frame and it is **deliberately absent from the
+      database** — a switch that does not turn something off is worse than no
+      switch. Everything else is taste: stat maxers, experience multipliers,
+      movement codes. Those are **offered, not applied**, and arrive disabled.
+
+      20 cheats in four folders, from the same community database
+      `scripts/gen-cheats.py` already reads, selected by
+      `scripts/gen-cheat-db.py` into the XML melonDS-android's own importer
+      understands.
+
+      Three things learned by reading that importer rather than guessing:
+
+      - **Cheats must be nested in a `<folder>`.** `XmlCheatDatabaseSAXHandler`
+        only opens a cheat while `parsingFolder` is true, so the top-level ones
+        the source database carries are silently skipped. Checked: zero orphans
+        in what we ship.
+      - **The `<gameid>` is what matches the ROM**, so it keeps the source's code
+        and checksum, `C24E 0AFFC6C3`.
+      - **Nothing `[SELECT]`-prefixed.** That family of codes activates while
+        SELECT is held and this build binds SELECT to the area map. They would
+        work, and every use would also flip the map up.
+
+      Ambiguity is refused rather than resolved: if a cheat name appears twice in
+      the source, the generator skips it and says so, because `x2` silently
+      becoming a movement code under a menu entry that still reads "x2" is the
+      failure that would never get noticed.
+
+      Seeding is guarded by a preference, not by looking for the database — a
+      user who deletes it meant to, and re-seeding on next launch would make it
+      impossible to get rid of.
+
 ## TODO
 - [ ] **Grow the overlay element by element**, each one verified against the
       bottom screen in the same frame the way HP/PP was. PB and the key count
