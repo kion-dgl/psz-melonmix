@@ -1,0 +1,70 @@
+diff --git a/src/frontend/qt_sdl/AudioSettingsDialog.cpp b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+index 6f4b5475..576b9285 100644
+--- a/src/frontend/qt_sdl/AudioSettingsDialog.cpp
++++ b/src/frontend/qt_sdl/AudioSettingsDialog.cpp
+@@ -98,6 +98,12 @@ AudioSettingsDialog::AudioSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+ 
+     ui->cbMic->setCurrentText(micdev);
+ 
++    // NO MICROPHONE SECTION. PSZ has no mic input, so the only thing this can
++    // do is offer a device the game never reads. Hidden rather than removed:
++    // the button group below is still built and still indexed by the stored
++    // mode, so an existing profile loads unchanged.
++    ui->groupBox_2->setVisible(false);
++
+     grpMicMode = new QButtonGroup(this);
+     grpMicMode->addButton(ui->rbMicNone,     micInputType_Silence);
+     grpMicMode->addButton(ui->rbMicExternal, micInputType_External);
+diff --git a/src/frontend/qt_sdl/Config.cpp b/src/frontend/qt_sdl/Config.cpp
+index 6c2b18a1..0fa8629b 100644
+--- a/src/frontend/qt_sdl/Config.cpp
++++ b/src/frontend/qt_sdl/Config.cpp
+@@ -65,7 +65,11 @@ DefaultList<int> DefaultInts =
+     // The GL one is the path this build is developed and tested on; the QPainter
+     // one stays as the fallback for a machine where the context fails to create.
+     {"3D.Renderer", renderer3D_OpenGL},
+-    {"3D.GL.ScaleFactor", 1},
++    // 2x native. The overlay draws its own art into a 256x192 layer and the
++    // 3D is what benefits from the extra pixels, so this is the setting
++    // that makes the game look like the machine it is running on rather
++    // than like a DS. Still a default, not an override.
++    {"3D.GL.ScaleFactor", 2},
+ #ifdef JIT_ENABLED
+     {"JIT.MaxBlockSize", 32},
+ #endif
+diff --git a/src/frontend/qt_sdl/VideoSettingsDialog.cpp b/src/frontend/qt_sdl/VideoSettingsDialog.cpp
+index c5feafe6..e11a1e16 100644
+--- a/src/frontend/qt_sdl/VideoSettingsDialog.cpp
++++ b/src/frontend/qt_sdl/VideoSettingsDialog.cpp
+@@ -71,6 +71,16 @@ VideoSettingsDialog::VideoSettingsDialog(QWidget* parent) : QDialog(parent), ui(
+     grp3DRenderer->addButton(ui->rb3DSoftware, renderer3D_Software);
+     grp3DRenderer->addButton(ui->rb3DOpenGL,   renderer3D_OpenGL);
+     grp3DRenderer->addButton(ui->rb3DCompute,  renderer3D_OpenGLCompute);
++
++    // NO SOFTWARE RENDERER. This build's overlay is developed and tested on the
++    // GL path, and the software one is materially slower for no benefit here.
++    // The radio is HIDDEN rather than removed from the group: an existing
++    // profile can still hold renderer3D_Software, and `grp3DRenderer->button()`
++    // is indexed by that value a few lines down -- dropping the button would
++    // dereference null on exactly the profiles most in need of moving off it.
++    ui->rb3DSoftware->setVisible(false);
++    ui->cbSoftwareThreaded->setVisible(false);
++    if (oldRenderer == renderer3D_Software) oldRenderer = renderer3D_OpenGL;
+ #if QT_VERSION < QT_VERSION_CHECK(5, 15, 0)
+     connect(grp3DRenderer, SIGNAL(buttonClicked(int)), this, SLOT(onChange3DRenderer(int)));
+ #else
+diff --git a/src/frontend/qt_sdl/Window.cpp b/src/frontend/qt_sdl/Window.cpp
+index a476073e..70689a4b 100755
+--- a/src/frontend/qt_sdl/Window.cpp
++++ b/src/frontend/qt_sdl/Window.cpp
+@@ -595,6 +595,10 @@ MainWindow::MainWindow(int id, EmuInstance* inst, QWidget* parent) :
+ 
+             actCameraSettings = menu->addAction("Camera settings");
+             connect(actCameraSettings, &QAction::triggered, this, &MainWindow::onOpenCameraSettings);
++            // PSZ is a DS game and never touches the DSi cameras. The action is
++            // built and connected as before so nothing downstream changes; it
++            // simply is not offered.
++            actCameraSettings->setVisible(false);
+ 
+             actAudioSettings = menu->addAction("Audio settings");
+             connect(actAudioSettings, &QAction::triggered, this, &MainWindow::onOpenAudioSettings);

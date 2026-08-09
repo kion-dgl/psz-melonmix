@@ -1,0 +1,145 @@
+diff --git a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+index cee6869b..f25dc06f 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/SharedPreferencesSettingsRepository.kt
+@@ -280,14 +280,18 @@ class SharedPreferencesSettingsRepository(
+ 
+     override fun getVideoRenderer(): Flow<VideoRenderer> {
+         return getOrCreatePreferenceSharedFlow("video_renderer") {
+-            val videoRendererPreference = preferences.getString("video_renderer", "software")!!
++            // OpenGL, not upstream's software default. The XML defaultValue only
++            // lands once the settings screen has been opened, so a fresh
++            // profile takes this one -- they have to agree or the default
++            // depends on whether the user has been to Settings.
++            val videoRendererPreference = preferences.getString("video_renderer", "opengl")!!
+             VideoRenderer.valueOf(videoRendererPreference.uppercase())
+         }
+     }
+ 
+     override fun getVideoInternalResolutionScaling(): Flow<Int> {
+         return getOrCreatePreferenceSharedFlow("video_internal_resolution") {
+-            val internalResolutionPreference = preferences.getString("video_internal_resolution", "1")!!
++            val internalResolutionPreference = preferences.getString("video_internal_resolution", "2")!!
+             internalResolutionPreference.toIntOrNull() ?: 1
+         }
+     }
+diff --git a/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt b/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
+index 699a5eb5..e22aebe3 100644
+--- a/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
++++ b/app/src/main/java/me/magnum/melonds/impl/input/DefaultControllerConfigurationFactory.kt
+@@ -10,10 +10,16 @@ class DefaultControllerConfigurationFactory : ControllerConfigurationFactory {
+ 
+     override fun buildDefaultControllerConfiguration(): ControllerConfiguration {
+         val inputList = listOf(
+-            InputConfig(Input.A, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_B)),
+-            InputConfig(Input.B, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_A)),
+-            InputConfig(Input.X, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_Y)),
+-            InputConfig(Input.Y, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_X)),
++            // FACE BUTTONS 1:1 WITH THEIR LABELS. Upstream crosses them --
++            // DS A onto physical B, DS X onto physical Y -- which is right for a
++            // Nintendo-labelled pad, where the positions are mirrored against
++            // the Xbox convention. The Retroid is Xbox-labelled, so the cross
++            // means the button under your thumb is never the one the game names.
++            // A build for one game on that hardware should match the print.
++            InputConfig(Input.A, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_A)),
++            InputConfig(Input.B, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_B)),
++            InputConfig(Input.X, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_X)),
++            InputConfig(Input.Y, InputConfig.Assignment.Key(null, KeyEvent.KEYCODE_BUTTON_Y)),
+             InputConfig(Input.LEFT, InputConfig.Assignment.Axis(null, MotionEvent.AXIS_HAT_X, InputConfig.Assignment.Axis.Direction.NEGATIVE), InputConfig.Assignment.Axis(null, MotionEvent.AXIS_X, InputConfig.Assignment.Axis.Direction.NEGATIVE)),
+             InputConfig(Input.RIGHT, InputConfig.Assignment.Axis(null, MotionEvent.AXIS_HAT_X, InputConfig.Assignment.Axis.Direction.POSITIVE), InputConfig.Assignment.Axis(null, MotionEvent.AXIS_X, InputConfig.Assignment.Axis.Direction.POSITIVE)),
+             InputConfig(Input.UP, InputConfig.Assignment.Axis(null, MotionEvent.AXIS_HAT_Y, InputConfig.Assignment.Axis.Direction.NEGATIVE), InputConfig.Assignment.Axis(null, MotionEvent.AXIS_Y, InputConfig.Assignment.Axis.Direction.NEGATIVE)),
+diff --git a/app/src/main/res/values/arrays.xml b/app/src/main/res/values/arrays.xml
+index d3e6b9b2..26a7ace2 100644
+--- a/app/src/main/res/values/arrays.xml
++++ b/app/src/main/res/values/arrays.xml
+@@ -29,8 +29,12 @@
+         <item>bottom_right</item>
+     </string-array>
+ 
++    <!-- No "software". This build's overlay is developed and tested on the GL
++         path, and on a handheld the software renderer is the difference between
++         playable and not. The VALUE is still understood by the code, so a
++         profile that already has it saved keeps working; it just cannot be
++         chosen any more. -->
+     <string-array name="video_renderer_values">
+-        <item>software</item>
+         <item>opengl</item>
+         <item>compute</item>
+     </string-array>
+diff --git a/app/src/main/res/values/strings.xml b/app/src/main/res/values/strings.xml
+index 464343eb..5f453e6e 100644
+--- a/app/src/main/res/values/strings.xml
++++ b/app/src/main/res/values/strings.xml
+@@ -527,7 +527,6 @@
+     </string-array>
+ 
+     <string-array name="video_renderer_options">
+-        <item>Software</item>
+         <item>OpenGL</item>
+         <item>Compute</item>
+     </string-array>
+diff --git a/app/src/main/res/xml/pref_audio.xml b/app/src/main/res/xml/pref_audio.xml
+index d01a0d7c..d934f4c3 100644
+--- a/app/src/main/res/xml/pref_audio.xml
++++ b/app/src/main/res/xml/pref_audio.xml
+@@ -50,8 +50,12 @@
+             android:entryValues="@array/audio_latency_values"
+             android:defaultValue="medium" />
+ 
++    <!-- HIDDEN, same reasoning as the DSi camera: PSZ has no microphone input,
++         so the only thing this setting can do is prompt for a permission the
++         game never uses. -->
+     <ListPreference
+             android:key="mic_source"
++            app:isPreferenceVisible="false"
+             android:title="@string/microphone_source"
+             android:summary="%s"
+             app:iconSpaceReserved="false"
+diff --git a/app/src/main/res/xml/pref_video.xml b/app/src/main/res/xml/pref_video.xml
+index d60618b0..beb21b1c 100644
+--- a/app/src/main/res/xml/pref_video.xml
++++ b/app/src/main/res/xml/pref_video.xml
+@@ -10,7 +10,7 @@
+             app:iconSpaceReserved="false"
+             android:entries="@array/video_renderer_options"
+             android:entryValues="@array/video_renderer_values"
+-            android:defaultValue="software"/>
++            android:defaultValue="opengl"/>
+ 
+     <ListPreference
+             android:key="video_internal_resolution"
+@@ -19,7 +19,7 @@
+             app:iconSpaceReserved="false"
+             android:entries="@array/video_internal_resolution_options"
+             android:entryValues="@array/video_internal_resolution_values"
+-            android:defaultValue="1"/>
++            android:defaultValue="2"/>
+ 
+     <SwitchPreference
+             android:key="enable_threaded_rendering"
+@@ -46,11 +46,17 @@
+             android:entryValues="@array/fps_counter_position_values"
+             android:defaultValue="hidden" />
+ 
++    <!-- HIDDEN, not deleted. PSZ is a DS game and never touches the DSi
++         cameras, so this is a setting that can only confuse. The preference
++         itself stays so the stored value and the code reading it are unchanged;
++         taking the camera out properly means the manifest feature, the runtime
++         permission and CameraManager too, which is its own piece of work. -->
+     <ListPreference
+             android:key="dsi_camera_source"
+             android:title="@string/dsi_camera_source"
+             android:summary="%s"
+             app:iconSpaceReserved="false"
++            app:isPreferenceVisible="false"
+             android:entries="@array/dsi_camera_source_options"
+             android:entryValues="@array/dsi_camera_source_values"
+             android:defaultValue="physical_cameras" />
+@@ -59,6 +65,7 @@
+             android:key="dsi_camera_static_image"
+             android:title="@string/dsi_camera_image"
+             android:dependency="dsi_camera_source"
++            app:isPreferenceVisible="false"
+             app:iconSpaceReserved="false"
+             app:type="file"
+             app:permissions="read"
