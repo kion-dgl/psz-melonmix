@@ -80,6 +80,22 @@ struct Frame
     bool panel = false;
     int hp = 0, maxHp = 0, pp = 0, maxPp = 0, level = 0;
 
+    // Photon blast charge, 0..10000. The game treats exactly full as its own
+    // state -- a different glyph, not a filled ring -- so drawing should too.
+    int pb = 0;
+
+    // Gate keys the player is carrying. Drawn under the minimap, where the game
+    // puts its own key row -- and drawn at zero too, the same as the game does,
+    // rather than appearing only once the player has picked one up.
+    int keys = 0;
+    bool keysShow = false;
+
+    // Where the minimap landed, as fractions of the top screen. The key count
+    // is positioned against this rather than against a corner of its own, so it
+    // stays under the map when the map is moved or rescaled.
+    bool mapPlaced = false;
+    float mx = 0, my = 0, mw = 0, mh = 0;
+
     // CUTS: a source rect on the bottom screen with an EXPLICIT destination,
     // as a fraction of the top screen. Elements anchor to a corner; these do
     // not, because they land inside artwork we draw -- the palette's three

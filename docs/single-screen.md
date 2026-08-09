@@ -199,11 +199,98 @@ Offsets came from psz-re and were checked statically against every savestate in
 ordering is worth keeping: an address bug and a rendering bug at the same time
 are much harder to separate than either alone.
 
+- [x] **PB gauge and the gate-key count**, the two elements kion asked for and
+      the overlay has been missing since the first HUD pass. Both come from
+      psz-re `docs/melonmix-hud-values.md`, and the confidence is not the same
+      for the two.
+
+      **Photon blast is `*(u32*)0x021A2204`, 0..10000** — confirmed there, with
+      the draw path traced and two independent corroborations.
+
+      **Drawn as a RING that fills, not a row of text.** It was a labelled bar
+      with a percentage first; kion played that on the Retroid and asked for
+      something quieter and closer to the game, which draws it as a circle. So it
+      is a ring in the plate's right-hand end — no label, no number, nothing to
+      read unless you look at it — sweeping clockwise from twelve, with the whole
+      disc lit at exactly full. That last part is the game's own distinction: it
+      changes *glyph* at 100 rather than completing the circle, so full is a state
+      rather than the end of a ramp, and it stays legible without a number.
+
+      Two things the first ring got wrong, both fixed by looking at it magnified
+      rather than at a screenshot: at r=5 with a one-pixel wall it rasterises as a
+      rounded square, and a near-black trough over the already-dark plate made an
+      empty gauge read as a smudge instead of as an empty gauge.
+
+      **It is drawn as an ellipse so it lands as a circle.** This layer is 256x192
+      and the single-screen presentation stretches it to 16:9, so a true circle
+      here arrives visibly wider than it is tall. The x radius is squashed to 3/4
+      to cancel that. The rest of the overlay is stretched the same way and it
+      does not matter, because stretched text still reads as text — a stretched
+      circle reads as an oval. `PSZ_HUD_RINGASPECT` retunes it; 1.0 is off, which
+      is what a 4:3 presentation would want.
+
+      **This corrects our own note**, which had the PB at `panel+0x05` behind a
+      panel object pointer nobody had. It is four bytes past current PP in the
+      block HP and PP already come from — no pointer, no new plumbing.
+
+      **Gate keys are a DIFFERENCE, not a value.** There is no held-key count in
+      memory: two monotone counters live in the stage context at
+      `*(0x02108C60)`, `+0x7C` rising by each gate's cost and `+0xCC` on pickup,
+      and what the player carries is `collected - used`. A two-key gate charges
+      2 in one step, so two barriers can be one gate.
+
+      **Drawn under the minimap, right-aligned to it, shown at zero, and only in
+      a field.** All of that came out of kion testing it. It first sat in the top-left readout,
+      because our map rect crops the game's own key row off and there was nothing
+      to anchor to; kion's answer was that proximity to the map is the whole
+      point, so the map now records where it landed and the count hangs off that
+      and follows it when the map moves. And it first appeared only once a key had
+      been collected, on my reasoning that both counters read zero outside a field
+      so a standing "KEYS 0" would be noise — kion wants it visible in the field
+      from the start, and **the game agrees with him**: its own key row reads `x0`
+      before you have found anything.
+
+      Which then made it visible in Dairon City, where he does not want it — so
+      the field test I had dodged is needed after all, and it is the room table
+      rather than the counters. Measured, all three cases:
+
+      | | rooms |
+      |---|---|
+      | Dairon City, and the transporter hub | **0** |
+      | the arena | **1**, all four exits `0xFF` |
+      | every capture that has ever held a key | **8, 9, 10, 14, 15** |
+
+      So the gate is **two or more rooms** — somewhere you can walk between rooms
+      is somewhere gates and keys exist, and a single exitless room is an arena,
+      where a key count is exactly the noise being complained about.
+
+      Checked here before drawing: over **83 field captures** the PB never
+      exceeds 10000 and `used` is never greater than `collected` — the invariant
+      that breaks first if the offsets are wrong — and the five states with keys
+      give 1 or 2 held.
+
+      Then walked on the real build, into a real field via the quest counter: HP
+      and PP track live and match the game's own panel frame for frame, the ring
+      sits empty where the game's own ring is empty, and `KEYS 0` shows under the
+      map where the game's row reads `x0`. Driving the counters over the debugger
+      afterwards takes it to a gold `KEYS 2` and back to `0` when they are spent,
+      and the ring through 25%, 64% and full.
+
+      **Stated plainly: the values are corpus-verified, the rendering was
+      exercised by writing the counters over the GDB stub.** A field run with
+      keys picked up naturally would be better evidence and has not been done.
+      psz-re flags the key offsets as validated-against-savestates rather than
+      gated, and the game's own HUD digit is *not* known to be computed this way.
+
+      The art-HUD path (`PSZ_HUD_ART`) is unchanged: `hp-pp.png` has troughs for
+      HP and PP and no PB element at all — the ring is drawn live by the game,
+      not baked into the panel — so adding one there would be inventing a widget
+      and guessing where it goes.
+
 ## TODO
 - [ ] **Grow the overlay element by element**, each one verified against the
-      bottom screen in the same frame the way HP/PP was. Next: PB gauge (byte
-      `panel+0x05` per psz-re's `sys.local-player-panel`, still needs the panel
-      object pointer), then the minimap from the room table.
+      bottom screen in the same frame the way HP/PP was. PB and the key count
+      are done (below); the minimap from the room table is next.
 - [ ] **Position and art** — the overlay is currently 104px in the top-left
       corner over the scene. Once widescreen lands it belongs in a margin.
 - [ ] **Find the real current-room field** (psz-re) — this is now the single

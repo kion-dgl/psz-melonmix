@@ -137,6 +137,35 @@ static constexpr u32 CurPpAddr   = 0x021A2200;
 static constexpr u32 MaxHpAddr   = 0x021A210C;
 static constexpr u32 MaxPpAddr   = 0x021A210E;
 
+// PHOTON BLAST, psz-re docs/melonmix-hud-values.md -- CONFIRMED there, with the
+// draw path traced and two independent corroborations: the community "Photon
+// Blaster Gauge Max" cheat writes 0x2710 to this exact address, and two natural
+// captures read 8428 and 10000 where kion reported "has pb charge" and "full".
+// An accumulator to 10,000, four bytes past current PP in the same block.
+//
+// The game divides it by 100 and draws the result as an octagonal ring: nothing
+// below a quarter, four filling steps, and a DIFFERENT GLYPH at exactly 100.
+// That last step is why full gets its own colour below rather than just a full
+// bar -- "ready" is a different state to the player, not the end of a ramp.
+static constexpr u32 PbGaugeAddr = 0x021A2204;   // u32, 0..10000
+
+// GATE KEYS, same document -- validated against savestates, NOT gated, and the
+// difference matters: the offsets came from labelled captures rather than from
+// reading the accessor, and there is no code literal into this block anywhere
+// in the 33 modules, so the pointer is the only way in.
+//
+// THERE IS NO HELD-KEY VALUE. The game keeps two monotone counters and what the
+// player carries is their difference. Looking for a single value is what cost
+// psz-re several attempts and one withdrawn reading.
+//
+// A gate charges by its KIND: a two-key gate moves `used` by 2 in one step, so
+// two barriers can be one logical gate. Both counters are FIELD-scoped and read
+// zero outside one, which is why the digit hides rather than drawing "0" -- in
+// town there is nothing to count, and a permanent 0 in the corner is noise.
+static constexpr u32 StageCtxPtr = 0x02108C60;   // -> stage context
+static constexpr u32 KeysUsedOff = 0x7C;         // u8, rises by the gate's cost
+static constexpr u32 KeysGotOff  = 0xCC;         // u8, rises on pickup
+
 // The contextual info box's text, UTF-16LE and NUL-terminated. Confirmed
 // against eight savestates: enemy names when targeting, item names when
 // standing on one. See psz-re docs/melonmix-questions.md Q1.
@@ -279,12 +308,26 @@ static constexpr u32 CcVtConfirm  = 0x02124A40;
 // is NOT screen order -- Skin sits before Costume in memory and after it on
 // screen -- and the run is not contiguous, since +0x0D and +0x0F belong to
 // something else.
-// The cursor -- which row the player is on. Found by taking three captures one
-// Down press apart: exactly ONE byte in all of main RAM read 0, 1, 2 across
-// them, and it then matched rows 3, 4 and 5 in captures it was not fitted to.
-// Reached as an offset from the widget, which is itself only reachable through
-// the fixed pointer.
-static constexpr u32 CcCursorOff = 0x5C68;
+// The cursor -- which row the player is on. It belongs to the APPEARANCE LIST
+// OBJECT, at +0x48 from the handle above, and reading it off the widget instead
+// was wrong in a way that hid itself.
+//
+// It was originally found as widget+0x5C68, by taking three captures one Down
+// press apart and keeping the single byte in all of main RAM that read 0, 1, 2 --
+// then confirmed against captures it had not been fitted to. That is a sound
+// method and it still produced a fitted constant: repeating it in a later session
+// gave widget+0x5378 just as cleanly, with +0x5C68 frozen, and on the older
+// captures +0x5378 is flat zero. The distance from the widget is not a layout at
+// all -- it is wherever the heap put the list object that run, and the list is
+// rebuilt every time you leave it and come back, which is why the old offset went
+// dead the moment name entry had been opened once.
+//
+// From the object it is one constant: sub+0x48 is the row on all 13 captures with
+// a known row, over three sessions and both heap addresses the list has occupied.
+// Gate it on the list's own vtable -- the handle also points at the keyboard and
+// the prompt, and +0x48 means nothing in those.
+static constexpr u32 CcVtList     = 0x02124634;
+static constexpr u32 CcRowOff     = 0x48;
 
 // Seven rows: six options and "Next Settings".
 static constexpr int kCcRows = 7;
@@ -1327,7 +1370,12 @@ Frame Update(NDS* nds)
                     for (int i = 0; i < 6; i++)
                         f.ccOpt[i] = (int)Read(nds, w + CcOptionsFor(f.ccRace)[i].off, 1);
 
-                    const int cur = (int)Read(nds, w + CcCursorOff, 1);
+                    // The row comes off the LIST OBJECT, not the widget, and
+                    // only when the open sub-screen really is the list.
+                    const u32 lst = Read(nds, CcSubScreen, 4);
+                    int cur = -1;
+                    if (InMainRAM(nds, lst) && Read(nds, lst, 4) == CcVtList)
+                        cur = (int)Read(nds, lst + CcRowOff, 1);
                     f.ccCursor = (cur >= 0 && cur < kCcRows) ? cur : -1;
 
                     // Name entry is separated from appearance by CcNameSlot,
@@ -1446,6 +1494,45 @@ Frame Update(NDS* nds)
         f.panel = f.maxHp > 0 && f.maxPp > 0 && f.hp <= f.maxHp &&
                   f.pp <= f.maxPp && f.level > 0 && f.level <= 200 &&
                   !EnvSet("PSZ_HUD_NOART");
+
+        // Photon blast. Range-checked for the same reason the panel is: a value
+        // over 10000 means this is not the block we think it is.
+        const u32 pb = Read(nds, PbGaugeAddr, 4);
+        f.pb = (pb <= 10000) ? (int)pb : 0;
+
+        // Gate keys, as the difference of the two counters.
+        //
+        // SHOWN AT ZERO IN A FIELD, and not shown at all outside one. Both
+        // halves came from kion playing it.
+        //
+        // It first appeared only once something had been collected, because both
+        // counters read zero outside a field and I had no way to tell an empty
+        // field from a town. He wants "KEYS 0" from the moment he lands, which
+        // the game itself does -- and then, seeing it everywhere, that it should
+        // stay out of Dairon City. So the field test I dodged is needed after
+        // all, and it is the room table rather than the counters.
+        //
+        // MEASURED, all three cases:
+        //
+        //   Dairon City, and the transporter hub    0 rooms
+        //   the arena                               1 room, all four exits 0xFF
+        //   every capture that has ever held a key  8, 9, 10, 14 or 15 rooms
+        //
+        // So the gate is two or more rooms: somewhere you can walk between rooms
+        // is somewhere gates and keys exist. A single exitless room is an arena,
+        // where a key count is exactly the noise he is objecting to. The count is
+        // applied after ReadRooms below, which is where roomCount is filled in.
+        //
+        // used > collected would mean the offsets are wrong -- it is the
+        // invariant psz-re checked across 79 field states and never saw broken.
+        // If it ever is, show nothing rather than a negative.
+        const u32 ctx = Read(nds, StageCtxPtr, 4);
+        if (f.panel && InMainRAM(nds, ctx))
+        {
+            const int used = (int)Read(nds, ctx + KeysUsedOff, 1);
+            const int got  = (int)Read(nds, ctx + KeysGotOff, 1);
+            if (used <= got) { f.keys = got - used; f.keysShow = true; }
+        }
     }
 
     // THE INFO PANEL EARNS ITS SPACE.
@@ -1577,6 +1664,12 @@ Frame Update(NDS* nds)
             c.sx = e.sx; c.sy = e.sy; c.sw = e.sw; c.sh = e.sh;
             c.dx = pl.x; c.dy = pl.y; c.dw = pl.w; c.dh = pl.h;
             c.alpha = MapOpacity();
+
+            // Remember where it landed so the key count can sit under it. The
+            // game's own key row is beneath its minimap and our map rect crops
+            // that row off, so this puts it back where the player looks for it.
+            f.mapPlaced = true;
+            f.mx = pl.x; f.my = pl.y; f.mw = pl.w; f.mh = pl.h;
             continue;
         }
 
@@ -1584,6 +1677,12 @@ Frame Update(NDS* nds)
     }
 
     ReadRooms(nds, f);
+
+    // The key count is a FIELD element -- see the gate-key note above for the three
+    // measurements behind the threshold. Applied here because this is where the
+    // room count exists; the counters themselves were read much earlier.
+    if (f.roomCount < 2) f.keysShow = false;
+
     f.active = true;
     LogFrame(f, heldOv, inGame, menuShown);
     return f;
@@ -1836,6 +1935,82 @@ static void DrawPlate(u32* dst, int x, int y, int w, int h)
     }
 }
 
+// A RING THAT FILLS, for the photon blast. Sweeps clockwise from twelve, the
+// way the game's own gauge does.
+//
+// Two rings, not one: an unlit trough all the way round so the gauge reads as a
+// gauge when it is empty rather than as nothing at all, and the lit arc over it.
+// At full the whole ring goes bright and the middle fills -- the game changes
+// GLYPH at exactly 100 rather than just completing the circle, so full is a
+// state of its own here too, and it is legible without a number beside it.
+//
+// Anti-aliasing is deliberately absent. At this size a soft edge is a smear.
+//
+// AND IT IS DRAWN AS AN ELLIPSE SO IT LANDS AS A CIRCLE. This layer is 256x192
+// and the single-screen presentation stretches it to 16:9, so x is scaled 4/3
+// more than y and a true circle here arrives on screen visibly wider than it is
+// tall -- which is what the first version did. Squashing the x radius to 3/4
+// cancels it: a*W/256 == b*H/192 with W/H = 16/9 gives a = 0.75b.
+//
+// The rest of the overlay is stretched the same way and nobody minds, because
+// stretched text still reads as text. A stretched circle reads as an oval, so
+// this one element is worth correcting. Anyone running the overlay at 4:3
+// instead gets a gauge 1.33x taller than wide; PSZ_HUD_RINGASPECT retunes it,
+// 1.0 being no correction at all.
+static float RingAspect()
+{
+    static const float a = [] {
+        const char* v = SettingRaw("PSZ_HUD_RINGASPECT");
+        if (!v) return 0.75f;
+        const float f = (float)std::atof(v);
+        return (f >= 0.4f && f <= 2.0f) ? f : 0.75f;
+    }();
+    return a;
+}
+
+static void DrawRingGauge(u32* dst, int cx, int cy, int r, float frac, bool full)
+{
+    if (r < 3) return;
+    if (frac < 0.0f) frac = 0.0f;
+    if (frac > 1.0f) frac = 1.0f;
+
+    // Thickness scales with the radius but never below 2px: at 1px the ring
+    // rasterises as a rounded square rather than a circle, which is what the
+    // first attempt at this looked like on screen.
+    const int rIn = r - (r >= 7 ? 3 : 2);
+
+    // The trough has to be VISIBLE. It was a near-black at low alpha first, and
+    // over the plate -- itself a dark translucent slab -- an empty gauge read as
+    // a smudge rather than as a gauge with nothing in it.
+    const u32 lit    = full ? 0xFFFFD880u : 0xFFFFB020u;
+    const u32 trough = 0xC0405060u;
+
+    const float sx = RingAspect();
+    const int rx = (int)(r * sx + 0.5f) < 2 ? 2 : (int)(r * sx + 0.5f);
+
+    for (int py = cy - r; py <= cy + r; py++)
+    {
+        if (py < 0 || py >= 192) continue;
+        for (int px = cx - rx; px <= cx + rx; px++)
+        {
+            if (px < 0 || px >= 256) continue;
+            // Undo the squash before measuring, so the wall thickness and the
+            // sweep angle are both computed in the round space the eye sees.
+            const float dx = (float)(px - cx) / sx, dy = (float)(py - cy);
+            const float d2 = dx * dx + dy * dy;
+            const bool inRing = d2 <= (float)(r * r) && d2 >= (float)(rIn * rIn);
+            const bool inCore = full && d2 < (float)(rIn * rIn);
+            if (!inRing && !inCore) continue;
+            if (inCore) { dst[py * 256 + px] = lit; continue; }
+
+            // 0 at twelve o'clock, increasing clockwise, normalised to 0..1.
+            float a = std::atan2(dx, -dy) / 6.2831853f;
+            if (a < 0.0f) a += 1.0f;
+            dst[py * 256 + px] = (a <= frac) ? lit : trough;
+        }
+    }
+}
+
 // MINIMAL PLAYER READOUT -- the default.
 //
 // The artwork panel is faithful but it is 124x50, half the width of a 256px
@@ -1855,16 +2030,42 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
     const int bw = (int)(56 * hs), bh = (int)(3 * hs);
     const int line = kGlyphH + 1;
 
+    // PHOTON BLAST IS A RING, not a row. It had a labelled bar and a percentage
+    // to begin with; kion played it and asked for something closer to what the
+    // game does and quieter than a third line of text, and the game draws it as
+    // a circle that fills.
+    //
+    // The plate is WIDENED to hold it rather than the ring floating beside the
+    // plate, so the readout stays one object. That still leaves the HUD shorter
+    // than the version with the PB row in it -- a line of text and a bar came
+    // out, and about half their height went back as width.
+    //
+    // Squeezing it into the free space beside the level was tried first and is
+    // why the size is stated in pixels here: the gap there allowed r=5, and at
+    // that radius with a 2px wall the circle rasterises as a rounded square.
+    const bool pbReady = f.pb >= 10000;
+    const int ringR = (int)(7 * hs) < 4 ? 4 : (int)(7 * hs);
+    // Width, not diameter: the gauge is squashed horizontally so it lands round
+    // on a 16:9 screen, so reserving 2r here would leave a visible dead margin.
+    const int ringW = (int)(ringR * 2 * RingAspect() + 0.5f) + (int)(4 * hs);
+    const int plateW = bw + (int)(8 * hs) + ringW;
+    const int plateH = (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs);
+
     // Rounded, and the same plate as the info box -- they are the same UI.
-    DrawPlate(dst, x - 3, y - 3, bw + (int)(8 * hs),
-              (kGlyphH + 1) * 3 + bh * 2 + (int)(10 * hs));
+    DrawPlate(dst, x - 3, y - 3, plateW, plateH);
+
+    DrawRingGauge(dst, x - 3 + plateW - (int)(3 * hs) - ringR, y - 3 + plateH / 2,
+                  ringR, pbReady ? 1.0f : (float)f.pb / 10000.0f, pbReady);
 
     char buf[24];
     std::snprintf(buf, sizeof(buf), "Lv%d", f.level);
     DrawText(dst, buf, x, y, 0xFFFFFF);
 
     struct Row { int cur, max; u32 rgb; };
-    const Row rows[2] = { { f.hp, f.maxHp, 0x40FF60 }, { f.pp, f.maxPp, 0x40A0FF } };
+    const Row rows[2] = {
+        { f.hp, f.maxHp, 0x40FF60 },
+        { f.pp, f.maxPp, 0x40A0FF },
+    };
     int ry = y + line + 2;
     for (const Row& r : rows)
     {
@@ -1888,6 +2089,31 @@ static void DrawPlayerReadout(u32* dst, const Frame& f)
         }
         ry += bh + 3;
     }
+}
+
+// The gate-key count, UNDER THE MINIMAP and right-aligned to it.
+//
+// It lived in the top-left readout first, because our map rect crops the game's
+// own key row off and there was nothing to anchor to up there. kion's answer was
+// that proximity to the map is the point -- that is where the player's eye goes
+// for it -- so the map now records where it landed and this hangs off that.
+// Moving or rescaling the map carries the count with it.
+static void DrawKeyCount(u32* dst, const Frame& f)
+{
+    if (!f.keysShow || !f.mapPlaced) return;
+
+    char buf[16];
+    std::snprintf(buf, sizeof(buf), "KEYS %d", f.keys);
+    int chars = 0;
+    for (const char* c = buf; *c; c++) chars++;
+
+    // Right edge shared with the map's, so the two line up as one block.
+    const int right = (int)((f.mx + f.mw) * 256.0f + 0.5f);
+    const int x = right - chars * kGlyphW;
+    const int y = (int)((f.my + f.mh) * 192.0f + 0.5f) + 1;
+    if (y + kGlyphH >= 192) return;
+
+    DrawText(dst, buf, x, y, f.keys > 0 ? 0xFFD860 : 0xFFFFFF);
 }
 
 // The player panel, drawn from values instead of clipped from the bottom
@@ -2093,12 +2319,15 @@ bool RenderArtLayer(u32* out, const Frame& f)
     const bool wantInfo  = !f.modal && f.info[0];
     const bool wantPal   = !f.modal && f.palette;
     const bool wantCc    = f.ccScreen >= 1 && f.ccScreen <= 3;
-    if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc) return false;
+    const bool wantKeys  = !f.modal && f.keysShow && f.mapPlaced;
+    if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc && !wantKeys)
+        return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
     if (wantLogo)  DrawTitleLogo(out, f.logoAlpha);
     if (wantPanel) { if (UseArtHud()) DrawPlayerPanel(out, f); else DrawPlayerReadout(out, f); }
     if (wantInfo)  DrawInfoPanel(out, f);
+    if (wantKeys)  DrawKeyCount(out, f);
     // Frame only; the icons are cuts, drawn by the frontend from the game's own
     // bottom screen -- see Frame::cuts.
     if (f.ccScreen == 1) DrawRaceSelect(out, f);
