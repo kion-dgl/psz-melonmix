@@ -287,6 +287,85 @@ are much harder to separate than either alone.
       not baked into the panel — so adding one there would be inventing a widget
       and guessing where it goes.
 
+- [x] **Emulator presentation defaults**, so a fresh install is already set up
+      for this one game instead of making every user find the settings.
+
+      | | was | now |
+      |---|---|---|
+      | Android renderer | software | **OpenGL**, and software is no longer offered |
+      | Android internal resolution | 1x | **2x** |
+      | Desktop internal resolution | 1x | **2x** |
+      | Face buttons (Android) | DS A on physical B, X on Y | **1:1 with the labels** |
+      | DSi camera settings | shown | hidden |
+      | Microphone settings | shown | hidden |
+
+      **The face buttons were crossed on purpose upstream** — DS `A` onto
+      `KEYCODE_BUTTON_B`, `X` onto `Y` — which is right for a Nintendo-labelled
+      pad, where the positions are mirrored against the Xbox convention. The
+      Retroid is Xbox-labelled, so the cross means the button under your thumb is
+      never the one the game names.
+
+      **Two defaults per setting, and they have to agree.** The Android renderer
+      and resolution each have an XML `defaultValue` *and* a hardcoded fallback
+      in `SharedPreferencesSettingsRepository`. The XML one only lands once the
+      settings screen has been opened, so a fresh profile takes the code one —
+      changing only the XML would make the default depend on whether the user had
+      been to Settings.
+
+      **Hidden, not removed**, for the software renderer and for camera and mic.
+      An existing profile can still hold `renderer3D_Software`, and the desktop
+      dialog indexes its button group *by that value* — dropping the radio would
+      dereference null on exactly the profiles most in need of moving off it. So
+      the control is hidden, the value still resolves, and the dialog quietly
+      moves such a profile to OpenGL. Taking camera and mic out properly means
+      the manifest feature, the runtime permission and `CameraManager` as well,
+      which is its own piece of work — filed as an issue rather than smuggled in
+      here.
+
+      **What this does NOT do is change a profile that already exists.** These
+      are defaults; a device that has already written these preferences keeps
+      what it has, including the button mapping. On the Retroid that needs a
+      reset-to-defaults in the app, or clearing the setting.
+
+- [x] **The cheat menu comes with cheats in it.** melonDS ships an empty cheat
+      list and expects you to find a database on the web and import it through
+      Settings — a real errand on a handheld, and the same errand every time for
+      a build that plays one game. So the database is bundled and seeded into the
+      menu on first run.
+
+      **The split is the point, and it matches how these codes differ.** 16:9
+      widescreen is an unambiguous improvement with no decision attached, so the
+      plugin applies it every frame and it is **deliberately absent from the
+      database** — a switch that does not turn something off is worse than no
+      switch. Everything else is taste: stat maxers, experience multipliers,
+      movement codes. Those are **offered, not applied**, and arrive disabled.
+
+      20 cheats in four folders, from the same community database
+      `scripts/gen-cheats.py` already reads, selected by
+      `scripts/gen-cheat-db.py` into the XML melonDS-android's own importer
+      understands.
+
+      Three things learned by reading that importer rather than guessing:
+
+      - **Cheats must be nested in a `<folder>`.** `XmlCheatDatabaseSAXHandler`
+        only opens a cheat while `parsingFolder` is true, so the top-level ones
+        the source database carries are silently skipped. Checked: zero orphans
+        in what we ship.
+      - **The `<gameid>` is what matches the ROM**, so it keeps the source's code
+        and checksum, `C24E 0AFFC6C3`.
+      - **Nothing `[SELECT]`-prefixed.** That family of codes activates while
+        SELECT is held and this build binds SELECT to the area map. They would
+        work, and every use would also flip the map up.
+
+      Ambiguity is refused rather than resolved: if a cheat name appears twice in
+      the source, the generator skips it and says so, because `x2` silently
+      becoming a movement code under a menu entry that still reads "x2" is the
+      failure that would never get noticed.
+
+      Seeding is guarded by a preference, not by looking for the database — a
+      user who deletes it meant to, and re-seeding on next launch would make it
+      impossible to get rid of.
+
 ## TODO
 - [ ] **Grow the overlay element by element**, each one verified against the
       bottom screen in the same frame the way HP/PP was. PB and the key count

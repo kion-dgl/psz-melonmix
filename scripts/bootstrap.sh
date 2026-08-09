@@ -106,6 +106,11 @@ sync_android() {
     # Copied rather than patched because they are binaries; a binary hunk in a
     # patch file is unreadable and merges badly.
     cp -r "$ROOT"/psz/android/res/. "$dir/app/src/main/res/"
+    # The bundled cheat database, seeded into the cheat menu on first run.
+    # Copied rather than patched for the same reason as the icons: it is a whole
+    # file we add, and a generated 20-cheat XML as a patch hunk is unreadable.
+    mkdir -p "$dir/app/src/main/assets"
+    cp "$ROOT"/psz/android/assets/*.xml "$dir/app/src/main/assets/"
 }
 
 # What the build scripts call. Full bootstrap when the tree is absent or the
