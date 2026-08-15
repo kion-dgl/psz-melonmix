@@ -146,12 +146,28 @@ struct Frame
     int roomCount = 0;
     Room rooms[MaxRooms];
 
-    // -1 = unknown. +0x414 was the obvious candidate and is REFUTED: in the
-    // 8-room Gurhacia state it reads 6 (cell D2, a dead end) while the game's
-    // own map puts the player in B4, room 0. Nothing else has been found, and
-    // every savestate on disk has the player in room 0, so no state on hand can
-    // distinguish "current room" from the constant zero.
+    // WHICH ROOM THE PLAYER IS IN. MEASURED, at last.
+    //
+    //     *(0x02108C64) + 0x16   u8, index into the room table
+    //
+    // +0x414 was the long-standing candidate and was refuted. The reason it
+    // could not be settled before is that every savestate on disk had the
+    // player in room 0, so "current room" and "constant zero" read alike.
+    // Three savestates taken in three DIFFERENT rooms separate them at once:
+    // this byte read 6, 7 and 5 for cells A3, A1 and A2, against a room table
+    // whose cells were known independently from the level's own topology.
+    //
+    // +0x0E is the PREVIOUS room by the same evidence (B3->A3, A2->A1,
+    // A1->A2). Not needed yet; recorded so it is not re-derived.
     int curRoom = -1;
+
+    // Player world position, 1/4096 fixed point. x/y/z at 0x021A2164/68/6C,
+    // immediately before the facing word at 0x021A2170 that was already
+    // documented -- y never moves on a flat field, which is what confirmed the
+    // triple. Kept for the record; the room comes from curRoom above, not from
+    // deriving a grid cell out of these.
+    bool posValid = false;
+    int posX = 0, posY = 0, posZ = 0;
 };
 
 // Call once per rendered frame. Applies the widescreen poke and services the

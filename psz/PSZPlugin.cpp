@@ -814,6 +814,112 @@ static void ReadRooms(NDS* nds, Frame& f)
     }
 }
 
+// FINDING "CURRENT ROOM" BY WATCHING IT CHANGE.
+//
+// Frame::curRoom has never been sourced, and not for want of looking: +0x414 is
+// the obvious candidate and was refuted outright. The real obstacle is that
+// every savestate on disk has the player standing in room 0, so a field holding
+// the current room and a field holding a constant zero READ IDENTICALLY. No
+// amount of staring at one frame separates them.
+//
+// A player WALKING THROUGH A DOORWAY separates them at once, so this reports
+// what CHANGED rather than what any single address holds. Two windows, both
+// chosen because the room table is already known to live there:
+//
+//   base+0x400..0x47F   the header the room count sits in at +0x410
+//   root+0x00..0x3F     the indirection above it, an equally plausible home
+//                       for "which of these rooms is the player in"
+//
+// Only bytes that actually changed are printed, so crossing one doorway yields
+// a handful of lines instead of a memory dump. A field tracking the player's
+// room MUST appear in that handful; anything that never appears is excluded.
+//
+// Gated on the player object existing, because the table is torn down and
+// rebuilt across a room load and diffing through the rebuild buries the signal
+// under every byte in both windows.
+static void ProbeRoomTable(NDS* nds, Frame& f)
+{
+    const bool probe  = EnvSet("PSZ_ROOM_PROBE");
+    // PSZ_ROOM_DUMP has to be in this test too. It was not, so setting only
+    // PSZ_ROOM_DUMP returned here before reaching the dump and the flag did
+    // nothing at all -- a silently inert switch, which is worse than a missing
+    // one because the log looks like evidence of no rooms rather than of no run.
+    if (!probe && !EnvSet("PSZ_ROOM_DUMP"))
+        return;
+
+    const u32 player = Read(nds, PlayerPtr, 4);
+    if (!InMainRAM(nds, player) || player == 0) return;
+
+    f.posX = (int)Read(nds, 0x021A2164, 4);
+    f.posY = (int)Read(nds, 0x021A2168, 4);
+    f.posZ = (int)Read(nds, 0x021A216C, 4);
+    f.posValid = true;
+
+    const u32 root = Read(nds, RoomRoot, 4);
+    if (!InMainRAM(nds, root)) return;
+    const u32 base = Read(nds, root, 4);
+    if (!InMainRAM(nds, base)) return;
+
+    static u32 lastDumpBase = 0;
+
+
+    if (!probe) return;
+
+    static u8 snap[2][0x80];
+    static bool primed = false;
+    static u32 lastBase = 0;
+
+    // A new base is a NEW TABLE, not a change within one. Reprime silently
+    // rather than report all 192 bytes as having "changed".
+    if (base != lastBase) { lastBase = base; primed = false; }
+
+    const u32 addrs[2] = { base + 0x400, root };
+    const int  lens[2] = { 0x80, 0x40 };
+    const u32  shown[2] = { 0x400, 0x000 };
+    const char* tags[2] = { "base+0x", "root+0x" };
+
+    for (int w = 0; w < 2; w++)
+        for (int i = 0; i < lens[w]; i++)
+        {
+            const u8 cur = (u8)Read(nds, addrs[w] + i, 1);
+            if (primed && cur != snap[w][i])
+                PszLog("[roomprobe] %s%03X: %02X -> %02X (rooms=%d)",
+                       tags[w], shown[w] + (u32)i, snap[w][i], cur, f.roomCount);
+            snap[w][i] = cur;
+        }
+    primed = true;
+}
+
+// WHICH ROOM THE PLAYER IS IN.
+//
+// One byte, read directly. Everything that came before this -- candidate
+// offsets, coloured dots, a world-to-grid solver fitting axis order and origin
+// against the room table -- was working around not knowing it. None of that is
+// needed: the game keeps the index at *(RoomRoot) + 0x16 and the room table is
+// indexed by it.
+//
+// See the header for how it was pinned. The short version: it could not be
+// settled from a single savestate, and three taken in different rooms settled
+// it immediately.
+static void LocatePlayerRoom(NDS* nds, Frame& f)
+{
+    if (f.roomCount <= 0) return;
+
+    const u32 player = Read(nds, PlayerPtr, 4);
+    if (!InMainRAM(nds, player) || player == 0) return;
+
+    f.posX = (int)Read(nds, 0x021A2164, 4);
+    f.posY = (int)Read(nds, 0x021A2168, 4);
+    f.posZ = (int)Read(nds, 0x021A216C, 4);
+    f.posValid = true;
+
+    const u32 root = Read(nds, RoomRoot, 4);
+    if (!InMainRAM(nds, root)) return;
+
+    const u32 cur = Read(nds, root + 0x16, 1);
+    f.curRoom = (cur < (u32)f.roomCount) ? (int)cur : -1;
+}
+
 // THE TWO FORKS EXPOSE DIFFERENT FRAMEBUFFER APIS.
 //
 // Upstream melonDS has GPU::GetFramebuffers(); melonDS-android-lib has the raw
@@ -1677,6 +1783,8 @@ Frame Update(NDS* nds)
     }
 
     ReadRooms(nds, f);
+    ProbeRoomTable(nds, f);
+    LocatePlayerRoom(nds, f);
 
     // The key count is a FIELD element -- see the gate-key note above for the three
     // measurements behind the threshold. Applied here because this is where the
@@ -2116,6 +2224,67 @@ static void DrawKeyCount(u32* dst, const Frame& f)
     DrawText(dst, buf, x, y, f.keys > 0 ? 0xFFD860 : 0xFFFFFF);
 }
 
+// THE ROOM PROBE READOUT -- a measuring instrument, not part of the HUD.
+//
+// Top-left, deliberately out of the way of all four ported corner elements, and
+// only ever present when PSZ_ROOM_WATCH asked for it. It shows the room count,
+// the watched offset and its value, so a candidate for "current room" can be
+// read AT THE MOMENT of crossing a doorway rather than reconstructed from a log
+// afterwards. A value that steps to a plausible room index on the crossing and
+// holds is the answer; one that does not is eliminated on the spot.
+// WHAT ROOM AM I IN -- the readout this was all for.
+//
+//     CELL A3
+//     ROOM 6 E n1
+//
+// The grid cell, then the room's index in the table, the compass letters of its
+// doorways, and psz-re's shape letter for that door count. The shape letter is
+// the first letter of the room model's name, so "n1" says the model is one of
+// the single-door family and "i2" narrows to ib*/ic*.
+//
+// The exact variant is deliberately NOT printed. Variants differ by contents
+// and by doorway offset along the same wall, neither of which is in the room
+// table, and a confidently wrong name is worse than a narrowed one when the
+// point is checking psz-godot against the original.
+static void DrawRoomIdent(u32* dst, const Frame& f)
+{
+    if (f.curRoom < 0) return;
+
+    const Room& r = f.rooms[f.curRoom];
+
+    char l0[24], l1[24];
+    std::snprintf(l0, sizeof(l0), "CELL %c%d", (char)('A' + r.cx), r.cy + 1);
+
+    static const char kDir[4] = { 'N', 'E', 'S', 'W' };
+    char sig[6]; int sn = 0, doors = 0;
+    for (int k = 0; k < 4; k++)
+        if (r.exits[k] != 0xFF) { if (sn < 4) sig[sn++] = kDir[k]; doors++; }
+    sig[sn] = 0;
+
+    // Shape letter by door count (psz-re doors_by_shape_letter). Two doors is
+    // ambiguous between i and l -- straight against corner -- so it is settled
+    // by whether the pair is on opposite walls.
+    char shape = '?';
+    if (doors == 1) shape = 'n';
+    else if (doors == 2)
+        shape = ((r.exits[0] != 0xFF && r.exits[2] != 0xFF) ||
+                 (r.exits[1] != 0xFF && r.exits[3] != 0xFF)) ? 'i' : 'l';
+    else if (doors == 3) shape = 't';
+    else if (doors == 4) shape = 'x';
+
+    std::snprintf(l1, sizeof(l1), "ROOM %d %s %c%d", f.curRoom, sig, shape, doors);
+
+    int wide = 0;
+    for (const char* p = l0; *p; p++) wide++;
+    int w1 = 0; for (const char* p = l1; *p; p++) w1++;
+    if (w1 > wide) wide = w1;
+
+    const int line = kGlyphH + 2;
+    DrawPlate(dst, 2, 2, wide * kGlyphW + 4, 2 * line + 4);
+    DrawText(dst, l0, 4, 4,        0xFFD860);
+    DrawText(dst, l1, 4, 4 + line, 0xFFFFFF);
+}
+
 // The player panel, drawn from values instead of clipped from the bottom
 // screen. Layout is against hp-pp.png's own 256x120 art, scaled to the
 // destination box, so retuning the box does not need the numbers moved.
@@ -2320,7 +2489,9 @@ bool RenderArtLayer(u32* out, const Frame& f)
     const bool wantPal   = !f.modal && f.palette;
     const bool wantCc    = f.ccScreen >= 1 && f.ccScreen <= 3;
     const bool wantKeys  = !f.modal && f.keysShow && f.mapPlaced;
-    if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc && !wantKeys)
+    const bool wantIdent = !f.modal && f.curRoom >= 0;
+    if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc && !wantKeys
+        && !wantIdent)
         return false;
 
     std::memset(out, 0, 256 * 192 * sizeof(u32));
@@ -2328,6 +2499,7 @@ bool RenderArtLayer(u32* out, const Frame& f)
     if (wantPanel) { if (UseArtHud()) DrawPlayerPanel(out, f); else DrawPlayerReadout(out, f); }
     if (wantInfo)  DrawInfoPanel(out, f);
     if (wantKeys)  DrawKeyCount(out, f);
+    if (wantIdent) DrawRoomIdent(out, f);
     // Frame only; the icons are cuts, drawn by the frontend from the game's own
     // bottom screen -- see Frame::cuts.
     if (f.ccScreen == 1) DrawRaceSelect(out, f);

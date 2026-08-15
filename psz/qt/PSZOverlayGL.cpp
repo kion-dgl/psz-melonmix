@@ -243,6 +243,7 @@ void OverlayGL::drawAreaMap(const Frame& f, float ax, float ay, float aw, float 
             case 3: fill(rx, my - t * 0.5f,                    pad + t, t,       cr, cg, cb, ca); break;
             }
         }
+
     }
 }
 
