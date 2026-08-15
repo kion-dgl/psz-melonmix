@@ -12,7 +12,8 @@ offset cannot satisfy at once --
 Scanning for the file offset where all three hold pins MainRAM exactly. Room
 record layout (psz-re): 0x34 bytes, cell +0x2E/+0x2F, exits +0x18..+0x1B,
 gate types +0x1C..+0x1F, keys +0x2C. Player position is at 0x021A2164 (x),
-+0x68 (y), +0x6C (z) in 1/4096 fixed point, with facing at +0x70.
++0x68 (y), +0x6C (z) in 1/4096 fixed point, with facing at +0x70. Current room is a
+u8 at root+0x16, previous room at root+0x0E.
 """
 import sys, struct, zlib, pathlib
 
@@ -82,30 +83,17 @@ def main(path):
         gs = ",".join(f"{DIRS[k]}={ga[k]}" for k in range(4) if ex[k] != 0xFF) or "-"
         print(f"{i:2d} {cell_name(cx,cy):>4}  {es:<16} {gs:<16} {keys:>4}  {r.hex()}")
 
-    # Which cell the player is standing in: cells are 44x44 world units spanning
-    # -22..+22 (psz-re room_doorways.json), so the cell is arithmetic. Reported
-    # for every plausible axis/sign convention, since which one the field uses
-    # is the one thing still unpinned -- the row that names a cell the table
-    # actually has is the right convention.
-    print("\nplayer cell under each convention (only rows hitting a real room matter):")
-    cells = {(cx, cy): i for i, (cx, cy, *_ ) in enumerate(rooms)}
-    cw = 44 * 4096
-    fl = lambda v: (v + cw // 2) // cw if (v + cw // 2) >= 0 else -((-(v + cw // 2) + cw - 1) // cw)
-    rx, rz = fl(px), fl(pz)
-    for swap in (0, 1):
-        for sx in (1, -1):
-            for sz in (1, -1):
-                a, b = (rz, rx) if swap else (rx, rz)
-                for dx in range(-8, 9):
-                    for dy in range(-8, 9):
-                        c = (sx * a + dx, sz * b + dy)
-                        if c in cells:
-                            print(f"  swap={swap} sx={sx:+d} sz={sz:+d} off=({dx},{dy}) "
-                                  f"-> cell {cell_name(*c)} = room {cells[c]}")
-                            break
-                    else:
-                        continue
-                    break
+    # Where the player is, read rather than derived. Deriving a cell from
+    # world position was tried and is wrong -- the coordinates look room-local
+    # and the grid origin is not cell 0 -- so this reads the index the game
+    # itself keeps and indexes the table with it.
+    cur = raw[ram(root + 0x16)]
+    prev = raw[ram(root + 0x0E)]
+    here = f"{cell_name(*rooms[cur][:2])} (room {cur})" if cur < n else f"?? ({cur})"
+    was = f"{cell_name(*rooms[prev][:2])} (room {prev})" if prev < n else f"?? ({prev})"
+    print(f"\ncurrent room: {here}")
+    print(f"previous room: {was}   <- stale until the first room change of a level")
+
     return 0
 
 
