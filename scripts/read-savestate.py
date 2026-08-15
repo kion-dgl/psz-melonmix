@@ -15,7 +15,7 @@ gate types +0x1C..+0x1F, keys +0x2C. Player position is at 0x021A2164 (x),
 +0x68 (y), +0x6C (z) in 1/4096 fixed point, with facing at +0x70. Current room is a
 u8 at root+0x16, previous room at root+0x0E.
 """
-import sys, struct, zlib, pathlib
+import sys, json, struct, zlib, pathlib
 
 RAM_BASE, RAM_SIZE = 0x02000000, 0x400000
 DIRS = "NESW"
@@ -93,6 +93,44 @@ def main(path):
     was = f"{cell_name(*rooms[prev][:2])} (room {prev})" if prev < n else f"?? ({prev})"
     print(f"\ncurrent room: {here}")
     print(f"previous room: {was}   <- stale until the first room change of a level")
+
+    # A RUN AS DATA, so a field can be recreated rather than described. Only
+    # what the game itself holds goes in here -- rooms, cells, doors, gate
+    # types, keys. Observed contents (waves, boxes, traps) are deliberately NOT
+    # invented: they are left as empty slots for a play report to fill, so the
+    # file never claims to know something nobody measured.
+    if "--json" in sys.argv:
+        out = sys.argv[sys.argv.index("--json") + 1]
+        doors = lambda r: {DIRS[k]: {"to": r[2][k], "gate": r[3][k]}
+                           for k in range(4) if r[2][k] != 0xFF}
+        shape = lambda r: ("n" if len(doors(r)) == 1 else
+                           ("i" if (r[2][0] != 0xFF and r[2][2] != 0xFF) or
+                                   (r[2][1] != 0xFF and r[2][3] != 0xFF) else "l")
+                           if len(doors(r)) == 2 else
+                           "t" if len(doors(r)) == 3 else "x")
+        doc = {
+            "source": str(pathlib.Path(path).name),
+            "note": "Rooms/doors/gates/keys are read from DS RAM. 'observed' is "
+                    "for a play report and is empty until filled in by hand.",
+            "stage_field_0x00": raw[ram(tbl) + 0x00],
+            "gate_types": {"0": "open", "2": "key gate (2 keys)", "4": "enemy defeat"},
+            "current_room": cur if cur < n else None,
+            "rooms": [
+                {
+                    "index": i,
+                    "cell": cell_name(r[0], r[1]),
+                    "cx": r[0], "cy": r[1],
+                    "doors": doors(r),
+                    "shape": shape(r),
+                    "keys": r[4],
+                    "record": raw[ram(tbl) + i * 0x34: ram(tbl) + (i + 1) * 0x34].hex(),
+                    "observed": {"model": None, "waves": [], "boxes": None, "traps": {}},
+                }
+                for i, r in enumerate(rooms)
+            ],
+        }
+        pathlib.Path(out).write_text(json.dumps(doc, indent=2))
+        print(f"\nwrote {out}")
 
     return 0
 
