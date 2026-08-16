@@ -55,6 +55,17 @@ struct Room
     u8 exits[4];        // N E S W, 0xFF = none
     u8 gates[4];        // 0 = open, else keyed / enemy-gated
     u8 keys;
+
+    // THE MODEL NAME, as the generator wrote it into the record. psz-re's
+    // shape_selector uses the same numbering (4 doors -> shape 3 'x').
+    //   shape  0 i, 1 l, 2 t, 3 x, 4 n, 5 s, 6 g   (+0x08)
+    //   letter 0 a, 1 b, 2 c, 3 d                  (+0x0C)
+    //   digit                                      (+0x10)
+    // So 3/1/2 is xb2 and 6/0/1 is ga1. Identifying a room from its CONTENTS
+    // instead is not just slower, it is wrong -- it produced two bad calls that
+    // only surfaced when these three bytes were decoded.
+    u8 shape, letter, digit;
+    u8 stage;           // +0x00, reads 3 on Rioh (s03). a/b variant unknown.
 };
 
 constexpr int MaxRooms = 20;

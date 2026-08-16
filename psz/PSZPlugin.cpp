@@ -806,6 +806,10 @@ static void ReadRooms(NDS* nds, Frame& f)
         r.cx = (u8)Read(nds, rec + 0x2E, 1);
         r.cy = (u8)Read(nds, rec + 0x2F, 1);
         r.keys = (u8)Read(nds, rec + 0x2C, 1);
+        r.shape  = (u8)Read(nds, rec + 0x08, 1);
+        r.letter = (u8)Read(nds, rec + 0x0C, 1);
+        r.digit  = (u8)Read(nds, rec + 0x10, 1);
+        r.stage  = (u8)Read(nds, rec + 0x00, 1);
         for (int k = 0; k < 4; k++)
         {
             r.exits[k] = (u8)Read(nds, rec + 0x18 + k, 1);
@@ -2256,23 +2260,19 @@ static void DrawRoomIdent(u32* dst, const Frame& f)
     std::snprintf(l0, sizeof(l0), "CELL %c%d", (char)('A' + r.cx), r.cy + 1);
 
     static const char kDir[4] = { 'N', 'E', 'S', 'W' };
-    char sig[6]; int sn = 0, doors = 0;
+    char sig[6]; int sn = 0;
     for (int k = 0; k < 4; k++)
-        if (r.exits[k] != 0xFF) { if (sn < 4) sig[sn++] = kDir[k]; doors++; }
+        if (r.exits[k] != 0xFF && sn < 4) sig[sn++] = kDir[k];
     sig[sn] = 0;
 
-    // Shape letter by door count (psz-re doors_by_shape_letter). Two doors is
-    // ambiguous between i and l -- straight against corner -- so it is settled
-    // by whether the pair is on opposite walls.
-    char shape = '?';
-    if (doors == 1) shape = 'n';
-    else if (doors == 2)
-        shape = ((r.exits[0] != 0xFF && r.exits[2] != 0xFF) ||
-                 (r.exits[1] != 0xFF && r.exits[3] != 0xFF)) ? 'i' : 'l';
-    else if (doors == 3) shape = 't';
-    else if (doors == 4) shape = 'x';
+    // Straight out of the record. The a/b stage variant is not known, so the
+    // name is printed WITHOUT it -- "s03_xb2", not "s03a_xb2" -- rather than
+    // guessing a letter and having it read as measured.
+    static const char kShape[7] = { 'i', 'l', 't', 'x', 'n', 's', 'g' };
+    const char sh = r.shape < 7 ? kShape[r.shape] : '?';
+    const char le = r.letter < 4 ? (char)('a' + r.letter) : '?';
 
-    std::snprintf(l1, sizeof(l1), "ROOM %d %s %c%d", f.curRoom, sig, shape, doors);
+    std::snprintf(l1, sizeof(l1), "s%02d_%c%c%d %s", r.stage, sh, le, r.digit, sig);
 
     int wide = 0;
     for (const char* p = l0; *p; p++) wide++;
