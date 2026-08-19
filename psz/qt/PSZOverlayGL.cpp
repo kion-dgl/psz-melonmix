@@ -220,18 +220,45 @@ void OverlayGL::drawAreaMap(const Frame& f, float ax, float ay, float aw, float 
         const float cx = rx + pad, cy = ry + pad, cw = cell - pad * 2, ch = cell - pad * 2;
         if (cw <= 2.f || ch <= 2.f) continue;
 
+        // Cell body: white outline, then an interior whose colour encodes the
+        // room's ROLE. Violet marks a RARE room -- class 'r' (letter index 4),
+        // the nr* family the force-rare cheat surfaces -- against light blue for
+        // an ordinary room. The current room is drawn on top as an amber core,
+        // inset so a rare current room still reads as both.
         fill(cx, cy, cw, ch, 1.f, 1.f, 1.f, 0.94f * o);      // outline
-        if (here) fill(cx + 1, cy + 1, cw - 2, ch - 2, 1.f, 210/255.f, 70/255.f, 1.f * o);
-        else      fill(cx + 1, cy + 1, cw - 2, ch - 2, 150/255.f, 200/255.f, 1.f, 0.96f * o);
+        const bool rare = (r.letter == 4);                   // 'r' == nr* rare room
+        if (rare) fill(cx + 1, cy + 1, cw - 2, ch - 2, 190/255.f, 120/255.f, 1.f,   0.96f * o);
+        else      fill(cx + 1, cy + 1, cw - 2, ch - 2, 150/255.f, 200/255.f, 1.f,   0.96f * o);
+        if (here)
+        {
+            const float in = (cw < ch ? cw : ch) * 0.28f;
+            fill(cx + in, cy + in, cw - in * 2, ch - in * 2, 1.f, 210/255.f, 70/255.f, 1.f * o);
+        }
+
+        // Keys the room holds, as gold pips along the top edge -- one per key,
+        // so a two-key room reads as two. Gold ties them to the gold key-gates
+        // they open.
+        for (int kk = 0; kk < r.keys && kk < 4; kk++)
+        {
+            const float s = (cw < ch ? cw : ch) * 0.16f + 1.f;
+            fill(cx + 2 + kk * (s + 1.f), cy + 2, s, s, 1.f, 216/255.f, 96/255.f, 1.f * o);
+        }
 
         for (int k = 0; k < 4; k++)
         {
             if (r.exits[k] == 0xFF) continue;
-            const bool open = (r.gates[k] == 0);
-            const float cr = open ? 235/255.f : 1.f;
-            const float cg = open ? 235/255.f : 120/255.f;
-            const float cb = open ? 235/255.f : 120/255.f;
-            const float ca = (open ? 0.86f : 0.92f) * o;
+            // Doorway colour by GATE TYPE, from the record: open white,
+            // key-gate gold (matching the key pips), enemy-defeat gate red.
+            // Any other nonzero falls back to red so an unmapped gate is never
+            // drawn as passable.
+            float cr, cg, cb, ca;
+            switch (r.gates[k])
+            {
+            case 0:  cr = 235/255.f; cg = 235/255.f; cb = 235/255.f; ca = 0.86f * o; break; // open
+            case 2:  cr = 1.f;       cg = 216/255.f; cb = 96/255.f;  ca = 0.94f * o; break; // key gate
+            case 4:  cr = 1.f;       cg = 90/255.f;  cb = 70/255.f;  ca = 0.94f * o; break; // enemy defeat
+            default: cr = 1.f;       cg = 90/255.f;  cb = 70/255.f;  ca = 0.94f * o; break; // unknown -> blocked
+            }
 
             float t = cell / 7.f; if (t < 2.f) t = 2.f;
             const float mx = rx + cell * 0.5f, my = ry + cell * 0.5f;

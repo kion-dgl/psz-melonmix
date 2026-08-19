@@ -96,6 +96,14 @@ static const unsigned int kCheat_SOUL_ITEMS_X99[] = {
     0x02242730u, 0x002F0303u,
 };
 
+static const unsigned int kCheat_FORCE_RARE_ROOM[] = {
+    0x020B2AF8u, 0x00000001u,
+};
+
+static const unsigned int kCheat_FORCE_COLISEUM[] = {
+    0x02082BB8u, 0x00000001u,
+};
+
 struct GeneratedCheat { const char* name; const char* env; bool defaultOn;
                         const unsigned int* codes; int words; };
 
@@ -109,6 +117,8 @@ static const GeneratedCheat kGeneratedCheats[] = {
     { "x8", "PSZ_CHEAT_EXP_X8", false, kCheat_EXP_X8, 14 },   // OptIn
     { "Boost Material x99 each", "PSZ_CHEAT_MATERIALS_X99", false, kCheat_MATERIALS_X99, 28 },   // OptIn
     { "Soul Item x99 each", "PSZ_CHEAT_SOUL_ITEMS_X99", false, kCheat_SOUL_ITEMS_X99, 36 },   // OptIn
+    { "Force Rare Room (stage nr)", "PSZ_CHEAT_FORCE_RARE_ROOM", false, kCheat_FORCE_RARE_ROOM, 2 },   // OptIn
+    { "Force Coliseum (nr2)", "PSZ_CHEAT_FORCE_COLISEUM", false, kCheat_FORCE_COLISEUM, 2 },   // OptIn
 };
 static const int kNumGeneratedCheats =
     sizeof(kGeneratedCheats) / sizeof(kGeneratedCheats[0]);
