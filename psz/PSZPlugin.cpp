@@ -131,7 +131,7 @@ static bool EnvSet(const char* name)
 // Level is in the SAVE-WORK object, not the player object -- reading +0x92 off
 // the player pointer gives 538, which is what made an earlier pass here
 // conclude, wrongly, that the offsets did not exist.
-static constexpr u32 SaveWorkPtr = 0x0211A530;   // -> save-work; +0x92 u16 level
+static constexpr u32 SaveWorkPtr = 0x0211A530;   // -> save-work; +0x92 u8 level
 static constexpr u32 CurHpAddr   = 0x021A21FE;
 static constexpr u32 CurPpAddr   = 0x021A2200;
 static constexpr u32 MaxHpAddr   = 0x021A210C;
@@ -1595,7 +1595,11 @@ Frame Update(NDS* nds)
         f.maxHp = (int)Read(nds, MaxHpAddr, 2);
         f.pp    = (int)Read(nds, CurPpAddr, 2);
         f.maxPp = (int)Read(nds, MaxPpAddr, 2);
-        f.level = InMainRAM(nds, sw) ? (int)Read(nds, sw + 0x92, 2) : 0;
+        // Level is a u8: earlier a u16 read here caught the adjacent byte (a
+        // separate stat) and produced e.g. 0x0F40=3904 for a level-64 save,
+        // failing the panel's level<=200 sanity gate. It only read right when
+        // that neighbour happened to be zero (low-level test saves).
+        f.level = InMainRAM(nds, sw) ? (int)Read(nds, sw + 0x92, 1) : 0;
 
         // Only claim the panel when the values are self-consistent. A zero max
         // or an out-of-range level means we are reading a stale or half-built
