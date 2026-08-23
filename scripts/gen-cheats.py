@@ -29,6 +29,8 @@ WANTED = [
     ("x8",                      "EXP_X8",        "OptIn"),
     ("Boost Material x99 each", "MATERIALS_X99", "OptIn"),
     ("Soul Item x99 each",      "SOUL_ITEMS_X99","OptIn"),
+    ("Force Rare Room (stage nr)", "FORCE_RARE_ROOM", "OptIn"),
+    ("Force Coliseum (nr2)",       "FORCE_COLISEUM",  "OptIn"),
 ]
 
 root = pathlib.Path(__file__).resolve().parent.parent

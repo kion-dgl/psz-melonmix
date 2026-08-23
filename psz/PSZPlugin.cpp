@@ -2269,8 +2269,12 @@ static void DrawRoomIdent(u32* dst, const Frame& f)
     // name is printed WITHOUT it -- "s03_xb2", not "s03a_xb2" -- rather than
     // guessing a letter and having it read as measured.
     static const char kShape[7] = { 'i', 'l', 't', 'x', 'n', 's', 'g' };
+    // Class table is 5 entries: a,b,c,d,r. Index 4 is 'r' -- the rare-room
+    // (nr*) class -- and a 4-char "abcd" table printed every forced rare room
+    // as '?', the false-negative documented in psz-godot's RE reference.
+    static const char kClass[5] = { 'a', 'b', 'c', 'd', 'r' };
     const char sh = r.shape < 7 ? kShape[r.shape] : '?';
-    const char le = r.letter < 4 ? (char)('a' + r.letter) : '?';
+    const char le = r.letter < 5 ? kClass[r.letter] : '?';
 
     std::snprintf(l1, sizeof(l1), "s%02d_%c%c%d %s", r.stage, sh, le, r.digit, sig);
 
@@ -2489,7 +2493,9 @@ bool RenderArtLayer(u32* out, const Frame& f)
     const bool wantPal   = !f.modal && f.palette;
     const bool wantCc    = f.ccScreen >= 1 && f.ccScreen <= 3;
     const bool wantKeys  = !f.modal && f.keysShow && f.mapPlaced;
-    const bool wantIdent = !f.modal && f.curRoom >= 0;
+    // Corner room readout: a debug overlay, off by default now that the SELECT
+    // map carries the room roles. PSZ_ROOM_IDENT=1 brings it back.
+    const bool wantIdent = EnvSet("PSZ_ROOM_IDENT") && !f.modal && f.curRoom >= 0;
     if (!wantLogo && !wantPanel && !wantInfo && !wantPal && !wantCc && !wantKeys
         && !wantIdent)
         return false;
