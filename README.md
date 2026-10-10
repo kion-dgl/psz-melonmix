@@ -6,8 +6,8 @@ is pleasant to play and to capture on one display.
 
 **You supply your own ROM.** Nothing here contains game data, and the ROM is
 never modified — this is a custom build of melonDS that loads your ROM as normal.
-The only thing written to the game is a single 16-bit value in emulated RAM each
-frame, the way an Action Replay code works.
+Gameplay adjustments write values in emulated RAM, the way an Action Replay
+code works.
 
 ![status](https://github.com/kion-dgl/psz-melonmix/actions/workflows/build.yml/badge.svg)
 
@@ -34,6 +34,26 @@ hides itself when nothing is locked on.
 rendering, relocated — which is why they have the correct art, the real room
 outline, the door markers, the enemy dots and the player arrow, without any of it
 being reimplemented or needing the game's internals to be understood first.
+
+## Analog movement
+
+On the USA release (`C24E`), the left stick supplies a continuous, camera-relative
+travel direction while running. The game still controls speed and turning.
+Map the stick directions to the DS D-pad as usual: those bindings start and stop
+movement and navigate menus. Desktop uses SDL game-controller left-stick axes;
+Android uses the controller's X/Y axes. The radial deadzone is 0.35.
+
+The hook runs after the game's digital direction decoding, before movement, in
+both interpreter and JIT modes. It changes the travel target, leaving facing to
+the original turning routine. Attacks, dodges, lock-on and input-disabled states
+retain their original handling. Other ROM regions are unchanged.
+Set `PSZ_MOVE_ON=0` to disable the override (restart required).
+
+Validation: `./scripts/test-analog.sh` checks heading conversion and RAM guards.
+After a desktop Ninja build configured with `-DCMAKE_EXPORT_COMPILE_COMMANDS=ON`,
+`./scripts/test-analog-core.py` exercises a synthetic guest loop through the real
+interpreter and JIT, including cached blocks and branch optimization. Neither
+test requires a game ROM. Controller feel still needs testing in-game on hardware.
 
 ## Build
 

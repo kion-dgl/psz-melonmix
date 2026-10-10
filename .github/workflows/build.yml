@@ -24,8 +24,10 @@ jobs:
             libsdl2-dev libpcap-dev libarchive-dev libzstd-dev libenet-dev \
             libslirp-dev libfaad-dev qt6-base-dev qt6-base-private-dev \
             qt6-multimedia-dev libqt6svg6-dev
+      - run: ./scripts/test-analog.sh
       - run: ./scripts/bootstrap.sh desktop
-      - run: ./scripts/build-desktop.sh
+      - run: ./scripts/build-desktop.sh -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
+      - run: ./scripts/test-analog-core.py
       - name: Package
         run: |
           mkdir -p dist

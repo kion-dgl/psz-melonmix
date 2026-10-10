@@ -15,6 +15,9 @@
 */
 
 #include "PSZPlugin.h"
+#include "PSZAnalog.h"
+#include <atomic>
+#include <mutex>
 #include "NDS.h"
 #include "GPU.h"
 #include "PSZOverlayIDs.h"
@@ -63,6 +66,8 @@ static const char* SettingRaw(const char* name)
 {
     if (const char* v = std::getenv(name)) return v;
 
+    static std::mutex settingsMutex;
+    std::lock_guard<std::mutex> lock(settingsMutex);
     static char buf[4096];
     static bool loaded = false;
     if (!loaded)
@@ -103,7 +108,7 @@ static const char* SettingRaw(const char* name)
         if (!eol) eol = p + std::strlen(p);
         if ((size_t)(eol - p) > len && std::strncmp(p, name, len) == 0 && p[len] == '=')
         {
-            static char val[128];
+            static thread_local char val[128];
             size_t n = (size_t)(eol - (p + len + 1));
             if (n >= sizeof(val)) n = sizeof(val) - 1;
             std::memcpy(val, p + len + 1, n);
@@ -1017,13 +1022,12 @@ static const int kCcRaceRow[3] = { 0, 2, 1 };
 
 // Right-stick state, set by the frontend once per frame.
 static float gCameraStick = 0.0f;
-static float gMoveX = 0.0f, gMoveY = 0.0f;
+static std::atomic<uint32_t> gMoveStick{0};
 static bool  gCamHolding  = false;   // stick is off centre; we own the angle
 static int   gCamYaw      = 0;
 void SetMoveStick(float x, float y)
 {
-    gMoveX = (x < -1.0f) ? -1.0f : (x > 1.0f) ? 1.0f : x;
-    gMoveY = (y < -1.0f) ? -1.0f : (y > 1.0f) ? 1.0f : y;
+    gMoveStick.store(Analog::Pack(x, y), std::memory_order_relaxed);
 }
 
 void SetCameraStick(float x)
@@ -1093,81 +1097,19 @@ static void ApplyCameraStick(NDS* nds)
     Write(nds, CamTgtYaw, (u32)gCamYaw, 2);
 }
 
-// ANALOG MOVEMENT DIRECTION.
-//
-// PSZ has no walk -- the d-pad is pressed or it is not, so the character stands
-// or runs -- and kion is happy with that. The problem is DIRECTION: the stick
-// is mapped onto d-pad bits, so running is quantised, which makes circling an
-// enemy hard in an action game.
-//
-// Speed is therefore left alone. The d-pad mapping still supplies "run"; this
-// only corrects the heading the game derived from those bits, by writing the
-// player's facing. Movement is camera-relative in PSZ, so the stick's angle is
-// taken relative to the camera's current yaw.
-//
-// Whether the game re-derives facing from the d-pad after we write is the open
-// question, and the same one the camera had. PSZ_MOVE_DEBUG reports what we
-// wrote and what it reads back a frame later, which answers it directly.
-static void ApplyMoveStick(NDS* nds)
+// Runs on the emulation thread at the post-input ARM9 hook, never in Update().
+void ApplyMoveStick(NDS* nds, u32 player)
 {
-    // OFF BY DEFAULT, because it does not do what it was written to do.
-    //
-    // The write lands -- kion sees the character face where we put it -- but
-    // movement keeps going the way the D-PAD says, so the only effect is a
-    // model facing that disagrees with travel. On a diagonal that reads as the
-    // character running up-left while looking right, which is worse than the
-    // rigid movement it was meant to fix.
-    //
-    // Two facts worth keeping from this: facing at 0x021A2170 IS writable and
-    // is NOT stomped, and movement direction is NOT derived from it. Analog
-    // movement therefore needs whatever computes the travel vector, which is
-    // psz-re melonmix-questions.md Q4.
-    //
-    // PSZ_MOVE_ON=1 re-enables it for experimenting.
-    static const bool on = EnvSet("PSZ_MOVE_ON");
-    if (!on) return;
-
-    const float mag = std::sqrt(gMoveX * gMoveX + gMoveY * gMoveY);
-    const u32 base = Read(nds, PlayerPtr, 4);
-    const bool havePlayer = InMainRAM(nds, base) && base != 0;
-
-    // Reported BEFORE either gate. The first pass logged after them, so an
-    // early return looked identical to the feature never running.
-    if (EnvSet("PSZ_MOVE_DEBUG"))
-    {
-        static int t = 0;
-        if ((t++ % 60) == 0)
-            PszLog("move in=(%.2f,%.2f) mag=%.2f player=%d keys=%04X",
-                   (double)gMoveX, (double)gMoveY, (double)mag,
-                   havePlayer ? 1 : 0, nds->KeyInput & 0xFFFF);
-    }
-
-    if (mag < 0.35f) return;                       // let the d-pad alone near centre
-    if (!havePlayer) return;
-
-    // Screen-space angle of the stick, 0 = away from the player (up).
-    const float rad = std::atan2(gMoveX, -gMoveY);
-    int ang = (int)(rad * 65536.0f / 6.28318530718f);
-
-    // Camera-relative unless told otherwise; the camera's own yaw is the frame.
-    if (!EnvSet("PSZ_MOVE_ABSOLUTE") && Read(nds, CameraObj, 4) == CameraVTable)
-        ang += (int)Read(nds, CamCurYaw, 2) + 32768;
-
-    static int offset = 0, offsetRead = 0;
-    if (!offsetRead)
-    {
-        offsetRead = 1;
-        if (const char* v = SettingRaw("PSZ_MOVE_OFFSET")) offset = std::atoi(v);
-    }
-    const u32 want = (u32)((ang + offset) & 0xFFFF);
-
-    if (EnvSet("PSZ_MOVE_DEBUG"))
-    {
-        static int t = 0;
-        if ((t++ % 30) == 0)
-            PszLog("move WRITE facing=%u -> %u", Read(nds, FacingAddr, 2), want);
-    }
-    Write(nds, FacingAddr, want, 2);
+    const uint32_t stick = gMoveStick.load(std::memory_order_relaxed);
+    if (!stick || !nds || !nds->MainRAM) return;
+    const auto* cart = nds->GetNDSCart();
+    if (!cart || std::memcmp(cart->GetHeader().GameCode, "C24E", 4) != 0) return;
+    static const bool enabled = [] {
+        const char* v = SettingRaw("PSZ_MOVE_ON");
+        return !v || (*v && *v != '0');
+    }();
+    if (!enabled) return;
+    Analog::Apply(nds->MainRAM, size_t(nds->MainRAMMask) + 1, player, stick);
 }
 
 // The GL frontend cannot read framebuffer pixels cheaply, so it measures the
@@ -1210,7 +1152,6 @@ Frame Update(NDS* nds)
 
     ApplyCheats(nds);
     ApplyCameraStick(nds);
-    ApplyMoveStick(nds);
 
     // CAMERA PROBE. PSZ_CAM_PROBE="0xADDR,delta" writes (player facing + 180
     // degrees + delta) to ADDR every frame. Differential analysis narrowed the

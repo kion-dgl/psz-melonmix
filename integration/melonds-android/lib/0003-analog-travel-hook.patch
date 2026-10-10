@@ -1,0 +1,60 @@
+diff --git a/src/ARM.cpp b/src/ARM.cpp
+index 827fcb0..b641caa 100644
+--- a/src/ARM.cpp
++++ b/src/ARM.cpp
+@@ -22,6 +22,8 @@
+ #include "NDS.h"
+ #include "DSi.h"
+ #include "ARM.h"
++#include "PSZAnalog.h"
++#include "PSZPlugin.h"
+ #include "ARMInterpreter.h"
+ #include "AREngine.h"
+ #include "ARMJIT.h"
+@@ -616,6 +618,11 @@ void ARMv5::Execute()
+ 
+     while (NDS.ARM9Timestamp < NDS.ARM9Target)
+     {
++        // PSZ: the local player's post-input update. Keep this on the CPU
++        // thread; a presentation-time write is overwritten by D-pad decoding.
++        if ((CPSR & 0x20) && R[15] - 2 == PSZMix::Analog::HookPC)
++            PSZMix::ApplyMoveStick(&NDS, R[0]);
++
+ #ifdef JIT_ENABLED
+         if constexpr (mode == CPUExecuteMode::JIT)
+         {
+diff --git a/src/ARMJIT.cpp b/src/ARMJIT.cpp
+index a9489ca..b2e7f08 100644
+--- a/src/ARMJIT.cpp
++++ b/src/ARMJIT.cpp
+@@ -17,6 +17,7 @@
+ */
+ 
+ #include "ARMJIT.h"
++#include "PSZAnalog.h"
+ #include "ARMJIT_Memory.h"
+ #include <string.h>
+ #include <assert.h>
+@@ -740,7 +741,11 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
+             JIT_DEBUGPRINT("merged BL\n");
+         }
+ 
+-        if (instrs[i].Info.Branches() && BranchOptimizations
++        // Do not inline across the PSZ post-input hook. Both initial trace
++        // execution and cached blocks must return to ARMv5::Execute here.
++        const bool pszMoveBoundary = cpu->Num == 0 && (cpu->CPSR & 0x20) &&
++            cpu->R[15] - 2 == PSZMix::Analog::HookPC;
++        if (instrs[i].Info.Branches() && BranchOptimizations && !pszMoveBoundary
+             && instrs[i].Info.Kind != (thumb ? ARMInstrInfo::tk_SVC : ARMInstrInfo::ak_SVC))
+         {
+             bool hasBranched = cpu->R[15] != r15;
+@@ -813,6 +818,9 @@ void ARMJIT::CompileBlock(ARM* cpu) noexcept
+             }
+         }
+ 
++        if (pszMoveBoundary)
++            instrs[i].Info.EndBlock = true;
++
+         i++;
+ 
+         bool canCompile = JITCompiler.CanCompile(thumb, instrs[i - 1].Info.Kind);
