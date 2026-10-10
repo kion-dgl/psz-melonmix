@@ -234,11 +234,13 @@ void SetBoxHasTextHint(bool hasText);
 // writing the game's own target yaw.
 void SetCameraStick(float x);
 
-// Left-stick direction, -1..1 each. The DS has no analog stick, so the
-// frontend maps this onto d-pad bits and the game only ever sees 4 or 8
-// directions. Passing the true vector lets the overlay correct the FACING the
-// game derived from those bits, which is where the resolution is lost.
+// Left-stick axes: x right, y down, -1..1. Send zero on release/disconnect.
+// The D-pad mapping still drives run/idle; this supplies the precise heading.
 void SetMoveStick(float x, float y);
+
+// ARM9 post-input hook. Called by the interpreter/JIT on the emulation thread
+// with r0 (the player), before the original facing and position updates.
+void ApplyMoveStick(NDS* nds, u32 player);
 
 // Where an element lands on the top screen, as a fraction of it. Normalised so
 // that the DS-resolution compositor, the Qt window-pixel overlay and the GL

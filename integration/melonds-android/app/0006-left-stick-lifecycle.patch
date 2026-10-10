@@ -1,0 +1,75 @@
+diff --git a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
+index 146e2dbe..826f1c80 100644
+--- a/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
++++ b/app/src/main/java/me/magnum/melonds/ui/emulator/EmulatorActivity.kt
+@@ -185,6 +185,21 @@ class EmulatorActivity : AppCompatActivity() {
+     }
+ 
+     private val connectedControllerManager = ConnectedControllerManager()
++    private var pszMoveDeviceId = -1
++    private fun clearPszMoveStick() {
++        pszMoveDeviceId = -1
++        MelonEmulator.pszSetMoveStick(0f, 0f)
++    }
++    private val pszMoveDeviceListener = object : InputManager.InputDeviceListener {
++        override fun onInputDeviceAdded(deviceId: Int) = Unit
++        override fun onInputDeviceChanged(deviceId: Int) {
++            if (deviceId == pszMoveDeviceId) clearPszMoveStick()
++        }
++        override fun onInputDeviceRemoved(deviceId: Int) {
++            if (deviceId == pszMoveDeviceId) clearPszMoveStick()
++        }
++    }
++
+     private lateinit var emulatorLaunchValidatorDelegate: EmulatorLaunchValidatorDelegate
+     private lateinit var emulatorRumbleManager: EmulatorRumbleManager
+     private lateinit var frameRenderCoordinator: FrameRenderCoordinator
+@@ -204,6 +219,7 @@ class EmulatorActivity : AppCompatActivity() {
+         }
+ 
+         override fun onPausePressed() {
++            clearPszMoveStick()
+             viewModel.pauseEmulator(true)
+         }
+ 
+@@ -618,6 +634,7 @@ class EmulatorActivity : AppCompatActivity() {
+         updateDisplays()
+         getSystemService<DisplayManager>()?.registerDisplayListener(displayListener, null)
+         getSystemService<InputManager>()?.registerInputDeviceListener(connectedControllerManager, null)
++        getSystemService<InputManager>()?.registerInputDeviceListener(pszMoveDeviceListener, null)
+         connectedControllerManager.startTrackingControllers()
+         frameRenderCoordinator.addSurface(binding.surfaceMain)
+     }
+@@ -717,6 +734,7 @@ class EmulatorActivity : AppCompatActivity() {
+ 
+     override fun onWindowFocusChanged(hasFocus: Boolean) {
+         super.onWindowFocusChanged(hasFocus)
++        if (!hasFocus) clearPszMoveStick()
+         setupFullscreen()
+     }
+ 
+@@ -897,6 +915,7 @@ class EmulatorActivity : AppCompatActivity() {
+             // and the axis probe that established this are removed.
+             val lx = event.getAxisValue(MotionEvent.AXIS_X)
+             val ly = event.getAxisValue(MotionEvent.AXIS_Y)
++            pszMoveDeviceId = event.deviceId
+             MelonEmulator.pszSetMoveStick(lx, ly)
+         }
+ 
+@@ -1026,6 +1045,7 @@ class EmulatorActivity : AppCompatActivity() {
+ 
+     override fun onPause() {
+         super.onPause()
++        clearPszMoveStick()
+         enableScreenTimeOut()
+         choreographerFrameRenderer.stopRendering()
+         viewModel.pauseEmulator(false)
+@@ -1045,6 +1065,8 @@ class EmulatorActivity : AppCompatActivity() {
+         super.onStop()
+         getSystemService<DisplayManager>()?.unregisterDisplayListener(displayListener)
+         getSystemService<InputManager>()?.unregisterInputDeviceListener(connectedControllerManager)
++        getSystemService<InputManager>()?.unregisterInputDeviceListener(pszMoveDeviceListener)
++        clearPszMoveStick()
+         connectedControllerManager.stopTrackingControllers()
+         frameRenderCoordinator.removeSurface(binding.surfaceMain)
+     }
